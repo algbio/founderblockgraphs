@@ -9,17 +9,18 @@
 using namespace std; 
 using namespace sdsl;
 
-#define GAPLIMIT 50 // Filtering out entries with too long gap regions
-
 /*
-# reads MSA in fasta format from argv[1]
-# finds a block repeat-free segmentation
-# converts the segmentation into a founder block graph
+  Reads MSA in fasta format from argv[1]
+  Finds a block repeat-free segmentation
+  Converts the segmentation into a founder block graph
 */
 
 /* To use, install sdsl-lite: https://github.com/simongog/sdsl-lite,
    copy this file to its examples subfolder, and run make */
 
+/* Copyright (C) 2020 Veli Mäkinen under GNU General Public License v3.0 */
+
+#define GAPLIMIT 50 // Filtering out entries with too long gap regions
 
 // For debugging purposes naive string matching
 unsigned int count(string P,string T) {
