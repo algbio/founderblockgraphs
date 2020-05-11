@@ -27,7 +27,7 @@ typedef cst_type::size_type size_type;
 
 
 // For debugging purposes naive string matching
-size_type count(std::string P,std::string T) {
+size_type count(std::string const &P,std::string const &T) {
     size_type result = 0;
     for (size_type i=0; i<T.size()-P.size(); i++) 
         if (P==T.substr(i,P.size())) 
