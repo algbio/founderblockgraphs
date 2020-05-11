@@ -6,12 +6,13 @@
 #include <sdsl/suffix_trees.hpp>
 #include <algorithm>
 #include <iomanip>
+#include <chrono> 
 using namespace std; 
 using namespace sdsl;
 
 /*
   Reads MSA in fasta format from argv[1]
-  Finds a block repeat-free segmentation
+  Finds a segment repeat-free segmentation
   Converts the segmentation into a founder block graph
 */
 
@@ -20,12 +21,11 @@ using namespace sdsl;
 
 /* Copyright (C) 2020 Veli Mäkinen under GNU General Public License v3.0 */
 
-#define GAPLIMIT 50 // Filtering out entries with too long gap regions
 
 // For debugging purposes naive string matching
-unsigned int count(string P,string T) {
-    unsigned int result = 0;
-    for (unsigned int i=0; i<T.size()-P.size(); i++) 
+size_t count(string P,string T) {
+    size_t result = 0;
+    for (size_t i=0; i<T.size()-P.size(); i++) 
         if (P==T.substr(i,P.size())) 
             result++;
     return result;  
@@ -33,10 +33,16 @@ unsigned int count(string P,string T) {
 
 int main(int argc, char **argv) { 
     if (argc <  2) {
-        cout << "Usage " << argv[0] << " MSA.fasta " << endl;
+        cout << "Usage " << argv[0] << " MSA.fasta [GAPLIMIT]" << endl;
         cout << "    This program constructs a founder block graph of MSA given in FASTA format" << endl;
         return 1;
     }
+    size_t GAPLIMIT=1; // Filtering out entries with too long gap regions
+    if (argc>2)
+        GAPLIMIT = atoi(argv[2]);
+
+    auto start = chrono::high_resolution_clock::now();
+
     string line,entry;
     vector<string> MSAtemp;
     vector<string> MSA;
@@ -57,36 +63,39 @@ int main(int argc, char **argv) {
     MSAtemp.push_back(entry); 
 
 
-    // Filtering out entries with too many gaps
+    // Filtering out entries with too many gaps or N's
     size_t ngaps=0;
     size_t maxgaprun=0;
     size_t gaprun=0;
     for (size_t i=0; i<MSAtemp.size(); i++) {
-        for (size_t j=0; j<MSAtemp[i].size()-1; j++)
-            if (MSAtemp[i][j]=='-') {
+        for (size_t j=0; j<MSAtemp[i].size(); j++)
+            if (MSAtemp[i][j]=='-' || MSAtemp[i][j]=='N') {
                ngaps++;
-               if (MSAtemp[i][j+1]=='-') 
-                  gaprun++; 
+               gaprun++;
             } 
             else {
                if (gaprun>maxgaprun)
                    maxgaprun = gaprun;
-               gaprun = 1; 
+               gaprun = 0; 
             }
         if (gaprun>maxgaprun)
-           maxgaprun = gaprun;     
+           maxgaprun = gaprun;
+        gaprun = 0;
         if (maxgaprun<GAPLIMIT) 
             MSA.push_back(MSAtemp[i]);
         ngaps = 0;
         maxgaprun = 0;  
     }     
     cout << "Input MSA[1.." << MSA.size() << ",1.." << MSA[0].size() << "]" << endl; 
-    // Concatenating for indexing
+    // Concatenating, removing gap symbols, and adding separators for indexing
     string C="";
-    for (size_t i=0; i<MSA.size();i++) {
-        C += MSA[i];
+    for (size_t i=0; i<MSA.size(); i++) {
+        for (size_t j=0; j<MSA[i].size(); j++) 
+            if (MSA[i][j]!='-') 
+                C += MSA[i][j]; 
+        C += '#';
     }
-
+   
     // Outputing concatenation to disk
     string plain_suffix = ".plain"; 
     fs.open(string(argv[1]) + plain_suffix, fstream::out);  
@@ -117,68 +126,75 @@ int main(int argc, char **argv) {
 
     /* v[j] is such that MSA[1..m][v[j]..j] is a repeat-free segment */
     /* The following computes it naively. 
-       This is a preprocessing part of the main algorithm*/
+       This is a preprocessing part of the main algorithm */
 
     size_t *v = new size_t[n];
     for (size_t i=0; i<n; i++)
         v[i] = 0;
  
-    unordered_map<size_t, size_t> ranges;
-    /* ranges[2]=5 tells that BWT interval [2..5] contains matches 
-       for subset of rows MSA[1..m][jp..j] */
+    unordered_map<size_t, size_t> bwt2row;
+    /* bwt2row[j]=i maps j-th smallest suffix to the row of MSA */
+
     size_t m = MSA.size();
     size_t *sp = new size_t[m];
     size_t *ep = new size_t[m];
+    size_t *lcp = new size_t[m];
     /* [sp[i]..ep[i]] maintains BWT interval of MSA[i][jp..j] */
+    /* lcp[i] = j-jp+1 minus the number of gap symbols in that range*/
+
     // initializing
     for (size_t i=0; i<m; i++) {
         sp[i] = 0;
         ep[i] = cst.csa.size()-1; 
+        lcp[i] = 0;
     }   
 
     size_t jp = n; // maintains the left-boundary 
     size_t sum;
     for (size_t j=n-1; j+1>0; j--) {
         v[j] = j+1; // no valid range found
-        //cout << "[" << jp << ".." << j << "]" << endl;
         if (j<n-1) {  
             /* contracting MSA[i][j] from right for all i */
-            ranges.clear();
+            bwt2row.clear();
             for (size_t i=0; i<m; i++) {
                 /* mapping BWT range to suffix tree node,
-                   taking parent, mapping back if parent is not too far*/ 
-                node_t ll = cst.select_leaf(sp[i]+1); 
-                node_t rl = cst.select_leaf(ep[i]+1); 
-                node_t w = cst.lca(ll,rl);
-                node_t u = cst.parent(w);
-                if (cst.depth(u)>=j-jp+1) {
-                   sp[i] = cst.lb(u);
-                   ep[i] = cst.rb(u);
-                }
-                ranges[sp[i]] = ep[i];
+                   taking parent, mapping back if parent is not too far*/
+                // Keeping old range on gap symbols
+                if (MSA[i][j+1]!='-') {    
+                    node_t ll = cst.select_leaf(sp[i]+1); 
+                    node_t rl = cst.select_leaf(ep[i]+1); 
+                    node_t w = cst.lca(ll,rl);
+                    node_t u = cst.parent(w);
+                    lcp[i]--;
+                    if (cst.depth(u)>=lcp[i]) {
+                       sp[i] = cst.lb(u);
+                       ep[i] = cst.rb(u);
+                    }
+                } 
+                bwt2row[sp[i]] = i;
             }
         }   
         while (1) {
             sum = 0;
-            for (const auto& range : ranges)
-                /* (key, value) = (range.first, range.second) */
-                sum += range.second-range.first+1;
-            //if (sum<m and sum>0) {
-            //    cout << "this should never happen: sum < m: " << sum << "<" << m << endl;
-            //} 
+            for (const auto& pair : bwt2row)
+                /* (key, value) = (pair.first, pair.second) */
+                sum += ep[pair.second]-pair.first+1;
             if (sum == m) { // no non-aligned matches
                 v[j]=jp;
-                // cout << "v[" << j << "]=" << jp << endl;
                 break;
             }    
             if (jp==0)
                 break;        
             jp--; 
             /* Now looking at MSA[1..m][jp..j] */
-            ranges.clear();
+            bwt2row.clear();
             for (size_t i=0; i<m; i++) {
-                sdsl::backward_search(cst.csa,sp[i],ep[i],MSA[i][jp],sp[i],ep[i]);
-                ranges[sp[i]]=ep[i];
+                // Keeping old range on gap symbols
+                if (MSA[i][jp]!='-') {
+                    sdsl::backward_search(cst.csa,sp[i],ep[i],MSA[i][jp],sp[i],ep[i]);
+                    lcp[i]++;
+                }
+                bwt2row[sp[i]]=i;
             }
         } 
     }  
@@ -210,19 +226,63 @@ int main(int argc, char **argv) {
     // outputing optimal score 
     cout << "Optimal score: " << s[n-1] << endl;
 
-    list<size_t> boundaries;
+    list<size_t> boundariestemp;
     size_t j = n-1;
-    boundaries.push_front(j);
+    boundariestemp.push_front(j);
     while (prev[j]<j) {
-        boundaries.push_front(prev[j]);
+        boundariestemp.push_front(prev[j]);
         j = prev[j];         
     }
+    vector<size_t> boundaries;
+    for (const auto& j : boundariestemp)
+        boundaries.push_back(j);
     cout << "Number of segments: " << boundaries.size() << endl;
-    cout << "List of segment boundaries: " << endl;
-    for (const auto& boundary : boundaries)
-        cout << boundary << endl;
-    /* TODO: Convert segmentation into founder block graph */
+    //cout << "List of segment boundaries: " << endl;
+    //for (const auto& boundary : boundaries)
+    //    cout << boundary << endl;
 
+    /* Convert segmentation into founder block graph */
+    unordered_map<string, size_t> str2id;
+    size_t nodecount = 0; 
+    size_t previndex = 0;
+    vector<size_t> *blocks = new vector<size_t>[boundaries.size()];
+    for (size_t j=0; j<boundaries.size(); j++) {
+        for (size_t i=0; i<m; i++)
+            if (!str2id.count(MSA[i].substr(previndex,boundaries[j]-previndex+1))) {       
+                blocks[j].push_back(nodecount);
+                str2id[MSA[i].substr(previndex,boundaries[j]-previndex+1)] = nodecount++;
+            }
+        previndex = boundaries[j]+1;
+    }
+
+    string *labels = new string[nodecount];
+    for (const auto& pair : str2id) {
+        labels[pair.second] = pair.first;
+    }
+    size_t totallength = 0; 
+    for (size_t i=0; i<nodecount; i++)
+        totallength += labels[i].size();
+
+    cout << "#nodes=" << nodecount << endl;
+    cout << "total length of node labels=" << totallength << endl; 
+    
+    unordered_map<size_t, size_t> *edges = new unordered_map<size_t, size_t>[nodecount];
+    previndex = 0;
+    for (size_t k=0; k<boundaries.size()-1; k++) {
+        for (size_t i=0; i<m; i++)
+            edges[str2id[MSA[i].substr(previndex,boundaries[k]-previndex+1)]][str2id[MSA[i].substr(previndex,boundaries[k+1]-boundaries[k]+1)]] = 1;
+        previndex = boundaries[k]+1;
+    }
+    size_t edgecount = 0;
+    for (size_t i=0; i<nodecount; i++)
+        edgecount += edges[i].size();
+    cout << "#edges=" << edgecount << endl;
+
+    auto end = chrono::high_resolution_clock::now();
+    auto duration = chrono::duration_cast<chrono::seconds>(end - start); 
+  
+    cout << "Time taken: "
+         << duration.count() << " seconds" << endl;     
 }
 
 
