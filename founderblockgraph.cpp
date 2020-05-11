@@ -6,8 +6,6 @@
 #include <algorithm>
 #include <iomanip>
 #include <chrono> 
-using namespace std; 
-using namespace sdsl;
 
 /*
   Reads MSA in fasta format from argv[1]
@@ -21,13 +19,15 @@ using namespace sdsl;
 /* Copyright (C) 2020 Veli Mäkinen under GNU General Public License v3.0 */
 
 
-typedef cst_sada<>          cst_type;
+namespace chrono = std::chrono;
+
+typedef sdsl::cst_sada<>          cst_type;
 typedef cst_type::node_type node_t;
 typedef cst_type::size_type size_type;
 
 
 // For debugging purposes naive string matching
-size_type count(string P,string T) {
+size_type count(std::string P,std::string T) {
     size_type result = 0;
     for (size_type i=0; i<T.size()-P.size(); i++) 
         if (P==T.substr(i,P.size())) 
@@ -37,8 +37,8 @@ size_type count(string P,string T) {
 
 int main(int argc, char **argv) { 
     if (argc <  2) {
-        cout << "Usage " << argv[0] << " MSA.fasta [GAPLIMIT]" << endl;
-        cout << "    This program constructs a founder block graph of MSA given in FASTA format" << endl;
+        std::cout << "Usage " << argv[0] << " MSA.fasta [GAPLIMIT]" << std::endl;
+        std::cout << "    This program constructs a founder block graph of MSA given in FASTA format" << std::endl;
         return 1;
     }
     size_type GAPLIMIT=1; // Filtering out entries with too long gap regions
@@ -47,13 +47,13 @@ int main(int argc, char **argv) {
 
     auto start = chrono::high_resolution_clock::now();
 
-    string line,entry;
-    vector<string> MSAtemp;
-    vector<string> MSA;
+    std::string line,entry;
+    std::vector<std::string> MSAtemp;
+    std::vector<std::string> MSA;
 
     // Reading input fasta
     std::fstream fs;
-    fs.open(argv[1], fstream::in);  
+    fs.open(argv[1], std::fstream::in);  
     getline(fs,line); // assuming header first
     while (getline(fs,line)) {
         if (line[0]=='>') { // header            
@@ -90,9 +90,9 @@ int main(int argc, char **argv) {
         ngaps = 0;
         maxgaprun = 0;  
     }     
-    cout << "Input MSA[1.." << MSA.size() << ",1.." << MSA[0].size() << "]" << endl; 
+    std::cout << "Input MSA[1.." << MSA.size() << ",1.." << MSA[0].size() << "]" << std::endl; 
     // Concatenating, removing gap symbols, and adding separators for indexing
-    string C="";
+    std::string C="";
     for (size_type i=0; i<MSA.size(); i++) {
         for (size_type j=0; j<MSA[i].size(); j++) 
             if (MSA[i][j]!='-') 
@@ -101,28 +101,28 @@ int main(int argc, char **argv) {
     }
    
     // Outputing concatenation to disk
-    string plain_suffix = ".plain"; 
-    fs.open(string(argv[1]) + plain_suffix, fstream::out);  
+    std::string plain_suffix = ".plain"; 
+    fs.open(std::string(argv[1]) + plain_suffix, std::fstream::out);  
     fs << C;
     fs.close();
 
     // Constructing compressed suffix tree for C
-    string index_suffix = ".cst";
+    std::string index_suffix = ".cst";
     
-    string index_file   = string(argv[1])+plain_suffix+index_suffix;
+    std::string index_file   = std::string(argv[1])+plain_suffix+index_suffix;
 
     cst_type cst;
     if (!load_from_file(cst, index_file)) {
-        ifstream in(string(argv[1])+plain_suffix);
+        std::ifstream in(std::string(argv[1])+plain_suffix);
         if (!in) {
-            cout << "ERROR: File " << argv[1] << ".plain" << " does not exist. Exit." << endl;
+            std::cout << "ERROR: File " << argv[1] << ".plain" << " does not exist. Exit." << std::endl;
             return 1;
         }
-        cout << "No index "<<index_file<< " located. Building index now." << endl;
-        construct(cst, string(argv[1])+plain_suffix, 1); // generate index
+        std::cout << "No index "<<index_file<< " located. Building index now." << std::endl;
+        construct(cst, std::string(argv[1])+plain_suffix, 1); // generate index
         store_to_file(cst, index_file); // save it
     }
-    cout << "Index construction complete, index requires " << size_in_mega_bytes(cst) << " MiB." << endl;
+    std::cout << "Index construction complete, index requires " << size_in_mega_bytes(cst) << " MiB." << std::endl;
 
 
     size_type n = MSA[0].size();
@@ -135,7 +135,7 @@ int main(int argc, char **argv) {
     for (size_type i=0; i<n; i++)
         v[i] = 0;
  
-    unordered_map<size_type, size_type> bwt2row;
+    std::unordered_map<size_type, size_type> bwt2row;
     /* bwt2row[j]=i maps j-th smallest suffix to the row of MSA */
 
     size_type m = MSA.size();
@@ -218,8 +218,8 @@ int main(int argc, char **argv) {
         s[j] = j+1; // handles case jp=0
         prev[j] = j+1; // handles case jp=0
         for (size_type jp=v[j]; jp>0; jp--) {
-            if (s[j]>max(s[jp-1],j-jp+1)) {
-                s[j] = max(s[jp-1],j-jp+1);
+            if (s[j]>std::max(s[jp-1],j-jp+1)) {
+                s[j] = std::max(s[jp-1],j-jp+1);
                 prev[j] = jp-1;       
             }
             if (s[j]==j-jp+1) 
@@ -227,28 +227,28 @@ int main(int argc, char **argv) {
         }
     }
     // outputing optimal score 
-    cout << "Optimal score: " << s[n-1] << endl;
+    std::cout << "Optimal score: " << s[n-1] << std::endl;
 
-    list<size_type> boundariestemp;
+    std::list<size_type> boundariestemp;
     size_type j = n-1;
     boundariestemp.push_front(j);
     while (prev[j]<j) {
         boundariestemp.push_front(prev[j]);
         j = prev[j];         
     }
-    vector<size_type> boundaries;
+    std::vector<size_type> boundaries;
     for (const auto& j : boundariestemp)
         boundaries.push_back(j);
-    cout << "Number of segments: " << boundaries.size() << endl;
-    //cout << "List of segment boundaries: " << endl;
+    std::cout << "Number of segments: " << boundaries.size() << std::endl;
+    //std::cout << "List of segment boundaries: " << std::endl;
     //for (const auto& boundary : boundaries)
-    //    cout << boundary << endl;
+    //    std::cout << boundary << std::endl;
 
     /* Convert segmentation into founder block graph */
-    unordered_map<string, size_type> str2id;
+    std::unordered_map<std::string, size_type> str2id;
     size_type nodecount = 0; 
     size_type previndex = 0;
-    vector<size_type> *blocks = new vector<size_type>[boundaries.size()];
+    std::vector<size_type> *blocks = new std::vector<size_type>[boundaries.size()];
     for (size_type j=0; j<boundaries.size(); j++) {
         for (size_type i=0; i<m; i++)
             if (!str2id.count(MSA[i].substr(previndex,boundaries[j]-previndex+1))) {       
@@ -258,7 +258,7 @@ int main(int argc, char **argv) {
         previndex = boundaries[j]+1;
     }
 
-    string *labels = new string[nodecount];
+    std::string *labels = new std::string[nodecount];
     for (const auto& pair : str2id) {
         labels[pair.second] = pair.first;
     }
@@ -266,10 +266,10 @@ int main(int argc, char **argv) {
     for (size_type i=0; i<nodecount; i++)
         totallength += labels[i].size();
 
-    cout << "#nodes=" << nodecount << endl;
-    cout << "total length of node labels=" << totallength << endl; 
+    std::cout << "#nodes=" << nodecount << std::endl;
+    std::cout << "total length of node labels=" << totallength << std::endl; 
     
-    unordered_map<size_type, size_type> *edges = new unordered_map<size_type, size_type>[nodecount];
+    std::unordered_map<size_type, size_type> *edges = new std::unordered_map<size_type, size_type>[nodecount];
     previndex = 0;
     for (size_type k=0; k<boundaries.size()-1; k++) {
         for (size_type i=0; i<m; i++)
@@ -279,13 +279,13 @@ int main(int argc, char **argv) {
     size_type edgecount = 0;
     for (size_type i=0; i<nodecount; i++)
         edgecount += edges[i].size();
-    cout << "#edges=" << edgecount << endl;
+    std::cout << "#edges=" << edgecount << std::endl;
 
     auto end = chrono::high_resolution_clock::now();
     auto duration = chrono::duration_cast<chrono::seconds>(end - start); 
   
-    cout << "Time taken: "
-         << duration.count() << " seconds" << endl;     
+    std::cout << "Time taken: "
+         << duration.count() << " seconds" << std::endl;     
 }
 
 
