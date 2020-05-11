@@ -43,8 +43,8 @@ void read_input(char const *input_path, std::size_t gap_limit, std::vector<std::
     // Reading input fasta
     std::fstream fs;
     fs.open(input_path, std::fstream::in);  
-    getline(fs,line); // assuming header first
-    while (getline(fs,line)) {
+    std::getline(fs,line); // assuming header first
+    while (std::getline(fs,line)) {
         if (line[0]=='>') { // header            
             MSAtemp.push_back(entry);  
             entry = "";     
