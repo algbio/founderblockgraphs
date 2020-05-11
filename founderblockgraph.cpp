@@ -131,26 +131,16 @@ int main(int argc, char **argv) {
     /* The following computes it naively. 
        This is a preprocessing part of the main algorithm */
 
-    size_type *v = new size_type[n];
-    for (size_type i=0; i<n; i++)
-        v[i] = 0;
- 
+    std::vector<size_type> v(n, 0);
     std::unordered_map<size_type, size_type> bwt2row;
     /* bwt2row[j]=i maps j-th smallest suffix to the row of MSA */
 
     size_type m = MSA.size();
-    size_type *sp = new size_type[m];
-    size_type *ep = new size_type[m];
-    size_type *lcp = new size_type[m];
+    std::vector<size_type> sp(m, 0);
+    std::vector<size_type> ep(m, cst.csa.size()-1);
+    std::vector<size_type> lcp(m, 0);
     /* [sp[i]..ep[i]] maintains BWT interval of MSA[i][jp..j] */
     /* lcp[i] = j-jp+1 minus the number of gap symbols in that range*/
-
-    // initializing
-    for (size_type i=0; i<m; i++) {
-        sp[i] = 0;
-        ep[i] = cst.csa.size()-1; 
-        lcp[i] = 0;
-    }   
 
     size_type jp = n; // maintains the left-boundary 
     size_type sum;
@@ -205,14 +195,12 @@ int main(int argc, char **argv) {
     /* Main algorithm begins */
     /* s[j] is the score of the optimal valid segmentation of MSA[1..m][1..j] */
     /* s[n]=min_{S is valid segmentation} max_{[a..b] \in S} b-a+1 */ 
-    size_type *s = new size_type[n];
+    std::vector<size_type> s(n, n);
 
     /* prev[j] is the pointer to the end of previous segment in optimal segmentation */
-    size_type *prev = new size_type[n];
+    std::vector<size_type> prev(n, n);
     // Computation of s[j]'s and prev[j]'s
     for (size_type j=0; j<n; j++) {
-        s[j] = n; // init
-        prev[j] = n; // init
         if (v[j]>j) 
             continue; // no valid range
         s[j] = j+1; // handles case jp=0
@@ -248,7 +236,10 @@ int main(int argc, char **argv) {
     std::unordered_map<std::string, size_type> str2id;
     size_type nodecount = 0; 
     size_type previndex = 0;
-    std::vector<size_type> *blocks = new std::vector<size_type>[boundaries.size()];
+    
+    typedef std::vector<size_type> block_vector;
+    typedef std::vector<block_vector> block_matrix;
+    block_matrix blocks(boundaries.size());
     for (size_type j=0; j<boundaries.size(); j++) {
         for (size_type i=0; i<m; i++)
             if (!str2id.count(MSA[i].substr(previndex,boundaries[j]-previndex+1))) {       
@@ -258,7 +249,7 @@ int main(int argc, char **argv) {
         previndex = boundaries[j]+1;
     }
 
-    std::string *labels = new std::string[nodecount];
+    std::vector<std::string> labels(nodecount);
     for (const auto& pair : str2id) {
         labels[pair.second] = pair.first;
     }
@@ -269,7 +260,9 @@ int main(int argc, char **argv) {
     std::cout << "#nodes=" << nodecount << std::endl;
     std::cout << "total length of node labels=" << totallength << std::endl; 
     
-    std::unordered_map<size_type, size_type> *edges = new std::unordered_map<size_type, size_type>[nodecount];
+    typedef std::unordered_map<size_type, size_type> edge_map;
+    typedef std::vector<edge_map> edge_map_vector;
+    edge_map_vector edges(nodecount);
     previndex = 0;
     for (size_type k=0; k<boundaries.size()-1; k++) {
         for (size_type i=0; i<m; i++)
@@ -285,7 +278,5 @@ int main(int argc, char **argv) {
     auto duration = chrono::duration_cast<chrono::seconds>(end - start); 
   
     std::cout << "Time taken: "
-         << duration.count() << " seconds" << std::endl;     
+         << duration.count() << " seconds" << std::endl;
 }
-
-
