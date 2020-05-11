@@ -36,48 +36,44 @@ size_type count(std::string const &P,std::string const &T) {
 }
 
 
+bool check_gaps(std::string const &sequence, std::size_t gap_limit)
+{
+    std::size_t gaprun(0);
+    std::size_t maxgaprun(0);
+    for (auto const c : sequence)
+    {
+        if ('-' == c || 'N' == c)
+            ++gaprun;
+        else
+        {
+            maxgaprun = std::max(gaprun, maxgaprun);
+            gaprun = 0;
+        }
+    }
+    
+    return (maxgaprun < gap_limit);
+}
+
+
 void read_input(char const *input_path, std::size_t gap_limit, std::vector<std::string> &MSA) {
     std::string line, entry;
-    std::vector<std::string> MSAtemp;
 
     // Reading input fasta
     std::fstream fs;
-    fs.open(input_path, std::fstream::in);  
+    fs.open(input_path, std::fstream::in);
     std::getline(fs,line); // assuming header first
-    while (std::getline(fs,line)) {
-        if (line[0]=='>') { // header            
-            MSAtemp.push_back(entry);  
-            entry = "";     
+    while (std::getline(fs, line)) {
+        if (line[0] == '>') { // header
+            if (check_gaps(entry, gap_limit))
+                MSA.push_back(entry);
+            entry.clear();
         }        
         else
             entry += line;
     }
-    fs.close(); 
-    MSAtemp.push_back(entry); 
-
-    // Filtering out entries with too many gaps or N's
-    size_type ngaps=0;
-    size_type maxgaprun=0;
-    size_type gaprun=0;
-    for (size_type i=0; i<MSAtemp.size(); i++) {
-        for (size_type j=0; j<MSAtemp[i].size(); j++)
-            if (MSAtemp[i][j]=='-' || MSAtemp[i][j]=='N') {
-               ngaps++;
-               gaprun++;
-            }
-            else {
-               if (gaprun>maxgaprun)
-                   maxgaprun = gaprun;
-               gaprun = 0; 
-            }
-        if (gaprun>maxgaprun)
-           maxgaprun = gaprun;
-        gaprun = 0;
-        if (maxgaprun<gap_limit)
-            MSA.push_back(MSAtemp[i]);
-        ngaps = 0;
-        maxgaprun = 0;
-    }
+    fs.close();
+    if (check_gaps(entry, gap_limit))
+        MSA.push_back(entry); 
 }
 
 
@@ -95,7 +91,7 @@ bool load_cst(char const *input_path, std::vector<std::string> const &MSA, cst_t
     // Outputing concatenation to disk
     std::string plain_suffix = ".plain"; 
     std::fstream fs;
-    fs.open(std::string(input_path) + plain_suffix, std::fstream::out);  
+    fs.open(std::string(input_path) + plain_suffix, std::fstream::out);
     fs << C;
     fs.close();
 
