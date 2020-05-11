@@ -35,25 +35,14 @@ size_type count(std::string const &P,std::string const &T) {
     return result;  
 }
 
-int main(int argc, char **argv) { 
-    if (argc <  2) {
-        std::cout << "Usage " << argv[0] << " MSA.fasta [GAPLIMIT]" << std::endl;
-        std::cout << "    This program constructs a founder block graph of MSA given in FASTA format" << std::endl;
-        return 1;
-    }
-    size_type GAPLIMIT=1; // Filtering out entries with too long gap regions
-    if (argc>2)
-        GAPLIMIT = atoi(argv[2]);
 
-    auto start = chrono::high_resolution_clock::now();
-
-    std::string line,entry;
+void read_input(char const *input_path, std::size_t gap_limit, std::vector<std::string> &MSA) {
+    std::string line, entry;
     std::vector<std::string> MSAtemp;
-    std::vector<std::string> MSA;
 
     // Reading input fasta
     std::fstream fs;
-    fs.open(argv[1], std::fstream::in);  
+    fs.open(input_path, std::fstream::in);  
     getline(fs,line); // assuming header first
     while (getline(fs,line)) {
         if (line[0]=='>') { // header            
@@ -66,7 +55,6 @@ int main(int argc, char **argv) {
     fs.close(); 
     MSAtemp.push_back(entry); 
 
-
     // Filtering out entries with too many gaps or N's
     size_type ngaps=0;
     size_type maxgaprun=0;
@@ -76,7 +64,7 @@ int main(int argc, char **argv) {
             if (MSAtemp[i][j]=='-' || MSAtemp[i][j]=='N') {
                ngaps++;
                gaprun++;
-            } 
+            }
             else {
                if (gaprun>maxgaprun)
                    maxgaprun = gaprun;
@@ -85,12 +73,16 @@ int main(int argc, char **argv) {
         if (gaprun>maxgaprun)
            maxgaprun = gaprun;
         gaprun = 0;
-        if (maxgaprun<GAPLIMIT) 
+        if (maxgaprun<gap_limit)
             MSA.push_back(MSAtemp[i]);
         ngaps = 0;
-        maxgaprun = 0;  
-    }     
-    std::cout << "Input MSA[1.." << MSA.size() << ",1.." << MSA[0].size() << "]" << std::endl; 
+        maxgaprun = 0;
+    }
+}
+
+
+bool load_cst(char const *input_path, std::vector<std::string> const &MSA, cst_type &cst) {
+    
     // Concatenating, removing gap symbols, and adding separators for indexing
     std::string C="";
     for (size_type i=0; i<MSA.size(); i++) {
@@ -102,28 +94,32 @@ int main(int argc, char **argv) {
    
     // Outputing concatenation to disk
     std::string plain_suffix = ".plain"; 
-    fs.open(std::string(argv[1]) + plain_suffix, std::fstream::out);  
+    std::fstream fs;
+    fs.open(std::string(input_path) + plain_suffix, std::fstream::out);  
     fs << C;
     fs.close();
 
     // Constructing compressed suffix tree for C
     std::string index_suffix = ".cst";
     
-    std::string index_file   = std::string(argv[1])+plain_suffix+index_suffix;
+    std::string index_file   = std::string(input_path)+plain_suffix+index_suffix;
 
-    cst_type cst;
-    if (!load_from_file(cst, index_file)) {
-        std::ifstream in(std::string(argv[1])+plain_suffix);
+    if (!sdsl::load_from_file(cst, index_file)) {
+        std::ifstream in(std::string(input_path)+plain_suffix);
         if (!in) {
-            std::cout << "ERROR: File " << argv[1] << ".plain" << " does not exist. Exit." << std::endl;
-            return 1;
+            std::cout << "ERROR: File " << input_path << ".plain" << " does not exist. Exit." << std::endl;
+            return false;
         }
         std::cout << "No index "<<index_file<< " located. Building index now." << std::endl;
-        construct(cst, std::string(argv[1])+plain_suffix, 1); // generate index
-        store_to_file(cst, index_file); // save it
+        sdsl::construct(cst, std::string(input_path)+plain_suffix, 1); // generate index
+        sdsl::store_to_file(cst, index_file); // save it
     }
-    std::cout << "Index construction complete, index requires " << size_in_mega_bytes(cst) << " MiB." << std::endl;
+    
+    return true;
+}
 
+
+void segment(std::vector<std::string> const &MSA, cst_type const &cst) {
 
     size_type n = MSA[0].size();
 
@@ -273,6 +269,32 @@ int main(int argc, char **argv) {
     for (size_type i=0; i<nodecount; i++)
         edgecount += edges[i].size();
     std::cout << "#edges=" << edgecount << std::endl;
+}
+
+
+int main(int argc, char **argv) { 
+    if (argc <  2) {
+        std::cout << "Usage " << argv[0] << " MSA.fasta [GAPLIMIT]" << std::endl;
+        std::cout << "    This program constructs a founder block graph of MSA given in FASTA format" << std::endl;
+        return 1;
+    }
+    size_type GAPLIMIT=1; // Filtering out entries with too long gap regions
+    if (argc>2)
+        GAPLIMIT = atoi(argv[2]);
+
+    auto start = chrono::high_resolution_clock::now();
+
+    std::vector<std::string> MSA;
+    read_input(argv[1], GAPLIMIT, MSA);
+    std::cout << "Input MSA[1.." << MSA.size() << ",1.." << MSA[0].size() << "]" << std::endl;
+    
+    cst_type cst;
+    if (!load_cst(argv[1], MSA, cst))
+        return EXIT_FAILURE;
+    
+    std::cout << "Index construction complete, index requires " << sdsl::size_in_mega_bytes(cst) << " MiB." << std::endl;
+
+    segment(MSA, cst);
 
     auto end = chrono::high_resolution_clock::now();
     auto duration = chrono::duration_cast<chrono::seconds>(end - start); 
