@@ -79,28 +79,30 @@ void read_input(char const *input_path, std::size_t gap_limit, std::vector<std::
 
 bool load_cst(char const *input_path, std::vector<std::string> const &MSA, cst_type &cst) {
     
-    // Concatenating, removing gap symbols, and adding separators for indexing
-    std::string C="";
-    for (size_type i=0; i<MSA.size(); i++) {
-        for (size_type j=0; j<MSA[i].size(); j++) 
-            if (MSA[i][j]!='-') 
-                C += MSA[i][j]; 
-        C += '#';
-    }
-   
-    // Outputing concatenation to disk
-    std::string plain_suffix = ".plain"; 
-    std::fstream fs;
-    fs.open(std::string(input_path) + plain_suffix, std::fstream::out);
-    fs << C;
-    fs.close();
-
-    // Constructing compressed suffix tree for C
-    std::string index_suffix = ".cst";
+    std::string const index_suffix(".cst");
+    std::string const plain_suffix(".plain");
+    std::string const index_file(std::string(input_path) + plain_suffix + index_suffix);
     
-    std::string index_file   = std::string(input_path)+plain_suffix+index_suffix;
-
-    if (!sdsl::load_from_file(cst, index_file)) {
+    // Constructing compressed suffix tree for C
+    if (!sdsl::load_from_file(cst, index_file))
+    {
+        {
+            // Concatenating, removing gap symbols, and adding separators for indexing
+            std::string C="";
+            for (size_type i=0; i<MSA.size(); i++) {
+                for (size_type j=0; j<MSA[i].size(); j++) 
+                    if (MSA[i][j]!='-') 
+                        C += MSA[i][j]; 
+                C += '#';
+            }
+   
+            // Outputing concatenation to disk
+            std::fstream fs;
+            fs.open(std::string(input_path) + plain_suffix, std::fstream::out);
+            fs << C;
+            fs.close();
+        }
+        
         std::ifstream in(std::string(input_path)+plain_suffix);
         if (!in) {
             std::cout << "ERROR: File " << input_path << ".plain" << " does not exist. Exit." << std::endl;
