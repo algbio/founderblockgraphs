@@ -86,20 +86,21 @@ bool load_cst(char const *input_path, std::vector<std::string> const &MSA, cst_t
     // Constructing compressed suffix tree for C
     if (!sdsl::load_from_file(cst, index_file))
     {
+        std::cout << "No index "<<index_file<< " located. Building index now." << std::endl;
+        
+        // Output concatenated inputs to disk. Remove gaps symbols and add separators for indexing.
         {
-            // Concatenating, removing gap symbols, and adding separators for indexing
-            std::string C="";
-            for (size_type i=0; i<MSA.size(); i++) {
-                for (size_type j=0; j<MSA[i].size(); j++) 
-                    if (MSA[i][j]!='-') 
-                        C += MSA[i][j]; 
-                C += '#';
-            }
-   
-            // Outputing concatenation to disk
             std::fstream fs;
             fs.open(std::string(input_path) + plain_suffix, std::fstream::out);
-            fs << C;
+            for (auto const &seq : MSA)
+            {
+                for (auto const c : seq)
+                {
+                    if ('-' != c)
+                        fs << c;
+                }
+                fs << '#';
+            }
             fs.close();
         }
         
@@ -108,7 +109,6 @@ bool load_cst(char const *input_path, std::vector<std::string> const &MSA, cst_t
             std::cout << "ERROR: File " << input_path << ".plain" << " does not exist. Exit." << std::endl;
             return false;
         }
-        std::cout << "No index "<<index_file<< " located. Building index now." << std::endl;
         sdsl::construct(cst, std::string(input_path)+plain_suffix, 1); // generate index
         sdsl::store_to_file(cst, index_file); // save it
     }
