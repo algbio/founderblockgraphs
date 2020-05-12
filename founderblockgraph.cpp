@@ -51,6 +51,7 @@ bool check_gaps(std::string const &sequence, std::size_t gap_limit)
         }
     }
     
+    maxgaprun = std::max(gaprun, maxgaprun);
     return (maxgaprun < gap_limit);
 }
 
