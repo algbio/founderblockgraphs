@@ -21,7 +21,7 @@
 
 namespace chrono = std::chrono;
 
-typedef sdsl::cst_sada<>          cst_type;
+typedef sdsl::cst_sada<> cst_type;
 typedef cst_type::node_type node_t;
 typedef cst_type::size_type size_type;
 
@@ -35,6 +35,13 @@ size_type count(std::string const &P,std::string const &T) {
     return result;  
 }
 
+std::string gaps_out(std:: string const &S) {
+    std::string result = "";
+    for (size_type i=0; i<S.size(); i++) 
+        if (S[i]!='-')
+            result += S[i];
+    return result;
+}
 
 bool check_gaps(std::string const &sequence, std::size_t gap_limit)
 {
@@ -65,7 +72,7 @@ void read_input(char const *input_path, std::size_t gap_limit, std::vector<std::
     std::getline(fs,line); // assuming header first
     while (std::getline(fs, line)) {
         if (line[0] == '>') { // header
-            if (check_gaps(entry, gap_limit))
+            if (gap_limit==0 || check_gaps(entry, gap_limit))
                 MSA.push_back(entry);
             entry.clear();
         }        
@@ -78,11 +85,11 @@ void read_input(char const *input_path, std::size_t gap_limit, std::vector<std::
 }
 
 
-bool load_cst(char const *input_path, std::vector<std::string> const &MSA, cst_type &cst) {
+bool load_cst(char const *input_path, std::vector<std::string> const &MSA, cst_type &cst, size_t gap_limit) {
     
     std::string const index_suffix(".cst");
     std::string const plain_suffix(".plain");
-    std::string const index_file(std::string(input_path) + plain_suffix + index_suffix);
+    std::string index_file = std::string(input_path) + plain_suffix + std::to_string(gap_limit) + index_suffix;
     
     // Constructing compressed suffix tree for C
     if (!sdsl::load_from_file(cst, index_file))
@@ -121,21 +128,24 @@ bool load_cst(char const *input_path, std::vector<std::string> const &MSA, cst_t
 void segment(std::vector<std::string> const &MSA, cst_type const &cst) {
 
     size_type n = MSA[0].size();
+    size_type N = cst.csa.size();
 
     /* v[j] is such that MSA[1..m][v[j]..j] is a repeat-free segment */
     /* The following computes it naively. 
        This is a preprocessing part of the main algorithm */
 
     std::vector<size_type> v(n, 0);
-    std::unordered_map<size_type, size_type> bwt2row;
-    /* bwt2row[j]=i maps j-th smallest suffix to the row of MSA */
+    std::unordered_map<size_type,size_type> bwt2row;
+    /* bwt2row[(sp,ep)]=i maps BWT[sp..ep] to the row of MSA */
 
     size_type m = MSA.size();
     std::vector<size_type> sp(m, 0);
     std::vector<size_type> ep(m, cst.csa.size()-1);
     std::vector<size_type> lcp(m, 0);
+    std::vector<bool> nested(m,false);
     /* [sp[i]..ep[i]] maintains BWT interval of MSA[i][jp..j] */
     /* lcp[i] = j-jp+1 minus the number of gap symbols in that range*/
+    /* nested[i] tells whether current interval is nested in another */
 
     size_type jp = n; // maintains the left-boundary 
     size_type sum;
@@ -153,25 +163,41 @@ void segment(std::vector<std::string> const &MSA, cst_type const &cst) {
                     node_t rl = cst.select_leaf(ep[i]+1); 
                     node_t w = cst.lca(ll,rl);
                     node_t u = cst.parent(w);
-                    lcp[i]--;
-                    if (cst.depth(u)>=lcp[i]) {
+                    lcp[i]--;              
+                    if (cst.depth(u)==lcp[i]) {
+                       // contracting first symbol from edge (u,w)
                        sp[i] = cst.lb(u);
                        ep[i] = cst.rb(u);
                     }
                 } 
-                bwt2row[sp[i]] = i;
+                bwt2row[sp[i]*N+ep[i]] = i;
             }
         }   
         while (1) {
+            bool nestedness = false; 
+            // checking nestedness
+            // TODO: this takes m^2 time, could be done faster
+            for (const auto& pair1 : bwt2row) {
+                /* (key=(sa[i],ep[i]), value=i) = (pair.first, pair.second) */              
+                nested[pair1.second] = false;
+                for (const auto& pair2 : bwt2row)
+                    if (pair1!=pair2 && sp[pair1.second]>=sp[pair2.second] && ep[pair1.second]<=ep[pair2.second]) {
+                       nested[pair1.second] = true; // extensions to the left may not help  
+                       nestedness = true;     
+                    }   
+            }   
             sum = 0;
             for (const auto& pair : bwt2row)
-                /* (key, value) = (pair.first, pair.second) */
-                sum += ep[pair.second]-pair.first+1;
-            if (sum == m) { // no non-aligned matches
+                /* (key=(sa[i],ep[i]), value=i) = (pair.first, pair.second) */
+                if (!nested[pair.second])
+                    sum += ep[pair.second]-sp[pair.second]+1;
+            if (!nestedness && sum == m) { // no non-aligned matches
                 v[j]=jp;
                 break;
             }    
-            if (jp==0)
+            if (nestedness && sum == m) // no other non-aligned matches than nested
+                break;
+            if (jp==0) // cannot go more to the left
                 break;        
             jp--; 
             /* Now looking at MSA[1..m][jp..j] */
@@ -182,7 +208,7 @@ void segment(std::vector<std::string> const &MSA, cst_type const &cst) {
                     sdsl::backward_search(cst.csa,sp[i],ep[i],MSA[i][jp],sp[i],ep[i]);
                     lcp[i]++;
                 }
-                bwt2row[sp[i]]=i;
+                bwt2row[sp[i]*N+ep[i]]=i;
             }
         } 
     }  
@@ -274,7 +300,10 @@ void segment(std::vector<std::string> const &MSA, cst_type const &cst) {
 int main(int argc, char **argv) { 
     if (argc <  2) {
         std::cout << "Usage " << argv[0] << " MSA.fasta [GAPLIMIT]" << std::endl;
-        std::cout << "    This program constructs a founder block graph of MSA given in FASTA format" << std::endl;
+        std::cout << "    This program constructs a segment repeat-free founder block graph" << std::endl;
+        std::cout << "    Input is MSA given in fasta format" << std::endl;
+        std::cout << "    Rows with runs of gaps '-' or N's >= GAPLIMIT will be filtered out " << std::endl;
+        std::cout << "    By default GAPLIMIT=1. With GAPLIMIT=0, filtering is skipped " << std::endl;
         return 1;
     }
     size_type GAPLIMIT=1; // Filtering out entries with too long gap regions
@@ -288,7 +317,7 @@ int main(int argc, char **argv) {
     std::cout << "Input MSA[1.." << MSA.size() << ",1.." << MSA[0].size() << "]" << std::endl;
     
     cst_type cst;
-    if (!load_cst(argv[1], MSA, cst))
+    if (!load_cst(argv[1], MSA, cst, GAPLIMIT))
         return EXIT_FAILURE;
     
     std::cout << "Index construction complete, index requires " << sdsl::size_in_mega_bytes(cst) << " MiB." << std::endl;
