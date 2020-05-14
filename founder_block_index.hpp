@@ -71,7 +71,7 @@ namespace founder_block_graph {
     
     auto founder_block_index::backward_search(char const c, size_type lhs, size_type rhs, size_type &out_lhs, size_type &out_rhs) -> size_type
     {
-        return sdsl::backward_search(csa, lhs, rhs, c, lhs, rhs);
+        return sdsl::backward_search(csa, lhs, rhs, c, out_lhs, out_rhs);
     }
     
     
@@ -113,18 +113,23 @@ namespace founder_block_graph {
                             // Update the lexicographic range.
                             // Rank support gives the number of set bits in [0, k).
                             auto const r(b_rank1_support(1 + lhs));
-                            new_lhs = b_select1_support(r);
-                            new_rhs = e_select1_support(r);
-                            retval += backward_search(it, end, new_lhs, new_rhs);
+                            if (r)
+                            {
+                                new_lhs = b_select1_support(r);
+                                new_rhs = e_select1_support(r);
+                                if (new_lhs <= lhs && rhs <= new_rhs)
+                                    retval += backward_search(it, end, new_lhs, new_rhs);
+                            }
                         }
                     }
                     
                     // Continue the search in the current block.
                     current_count = backward_search(*it, lhs, rhs, lhs, rhs);
-                    retval += current_count;
                     if (0 == current_count)
                         break;
+                    ++it;
                 } while (it != end);
+                retval += current_count;
             }
         }
         
