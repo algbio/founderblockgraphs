@@ -1,11 +1,17 @@
 #include <iostream>
-#include <fstream>      
+#include <fstream>
 #include <string>
+#include <sdsl/construct.hpp>
 #include <sdsl/suffix_arrays.hpp>
 #include <sdsl/suffix_trees.hpp>
+#include <sdsl/util.hpp>
 #include <algorithm>
 #include <iomanip>
-#include <chrono> 
+#include <chrono>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+#include "founder_block_index.hpp"
 
 /*
   Reads MSA in fasta format from argv[1]
@@ -20,10 +26,47 @@
 
 
 namespace chrono = std::chrono;
+namespace fbg = founder_block_graph;
 
 typedef sdsl::cst_sada<> cst_type;
 typedef cst_type::node_type node_t;
 typedef cst_type::size_type size_type;
+
+typedef std::unordered_set<size_type> edge_set;
+typedef std::vector<edge_set> adjacency_list;
+
+
+class temporary_file
+{
+protected:
+    std::string m_name;
+    int         m_fd{-1};
+    
+public:
+    temporary_file(std::string const &dst_dir):
+        m_name(dst_dir + "/temp.XXXXXX")
+    {
+    }
+    
+    ~temporary_file()
+    {
+        if (-1 != m_fd)
+            close(m_fd);
+    }
+    
+    std::string const &name() const { return m_name; }
+    
+    void open()
+    {
+        m_fd = mkstemp(m_name.data()); // Since C++11, data() returns a null-terminated buffer.
+        if (-1 == m_fd)
+        {
+            std::string reason("Unable to create temporary file: ");
+            reason += strerror(errno);
+            throw std::runtime_error(reason);
+        }
+    }
+};
 
 
 // For debugging purposes naive string matching
@@ -96,7 +139,7 @@ bool load_cst(char const *input_path, std::vector<std::string> const &MSA, cst_t
     {
         std::cout << "No index "<<index_file<< " located. Building index now." << std::endl;
         
-        // Output concatenated inputs to disk. Remove gaps symbols and add separators for indexing.
+        // Output concatenated inputs to disk. Remove gap symbols and add separators for indexing.
         {
             std::fstream fs;
             fs.open(std::string(input_path) + plain_suffix, std::fstream::out);
@@ -125,7 +168,12 @@ bool load_cst(char const *input_path, std::vector<std::string> const &MSA, cst_t
 }
 
 
-void segment(std::vector<std::string> const &MSA, cst_type const &cst) {
+void segment(
+    std::vector<std::string> const &MSA,
+    cst_type const &cst,
+    std::vector <std::string> &out_labels,
+    adjacency_list &out_edges
+) {
 
     size_type n = MSA[0].size();
     size_type N = cst.csa.size();
@@ -281,25 +329,101 @@ void segment(std::vector<std::string> const &MSA, cst_type const &cst) {
     std::cout << "#nodes=" << nodecount << std::endl;
     std::cout << "total length of node labels=" << totallength << std::endl; 
     
-    typedef std::unordered_map<size_type, size_type> edge_map;
-    typedef std::vector<edge_map> edge_map_vector;
-    edge_map_vector edges(nodecount);
+    adjacency_list edges(nodecount);
     previndex = 0;
-    for (size_type k=0; k<boundaries.size()-1; k++) {
+    for (size_type k=0; k<boundaries.size()-1; k++)
+    {
         for (size_type i=0; i<m; i++)
-            edges[str2id[MSA[i].substr(previndex,boundaries[k]-previndex+1)]][str2id[MSA[i].substr(previndex,boundaries[k+1]-boundaries[k]+1)]] = 1;
+        {
+            auto const &src_node_label(MSA[i].substr(previndex,boundaries[k]-previndex+1));
+            auto const &dst_node_label(MSA[i].substr(previndex,boundaries[k+1]-boundaries[k]+1));
+            auto const src_node_idx(str2id[src_node_label]);
+            auto const dst_node_idx(str2id[dst_node_label]);
+            edges[src_node_idx].insert(dst_node_idx);
+        }
         previndex = boundaries[k]+1;
     }
     size_type edgecount = 0;
     for (size_type i=0; i<nodecount; i++)
         edgecount += edges[i].size();
     std::cout << "#edges=" << edgecount << std::endl;
+    
+    using std::swap;
+    swap(out_labels, labels);
+    swap(out_edges, edges);
+}
+
+
+void make_index(
+    std::vector <std::string> node_labels,
+    adjacency_list edges,
+    char const *dst_path_c
+) {
+    // Create a temporary file.
+    std::string const dst_path(dst_path_c);
+    std::string const dirname(sdsl::util::dirname(dst_path));
+    temporary_file temp_file(dirname);
+    temp_file.open();
+    std::fstream os(temp_file.name());
+    
+    // Write the index contents to it.
+    for (std::size_t i(0), count(edges.size()); i < count; ++i)
+    {
+        auto const &src_label(node_labels[i]);
+        
+        // Make sure that the destination nodes are sorted.
+        auto const &dst_nodes(edges[i]);
+        std::vector sorted_dst_nodes(dst_nodes.begin(), dst_nodes.end());
+        std::sort(sorted_dst_nodes.begin(), sorted_dst_nodes.end());
+        
+        for (auto const dst_node : sorted_dst_nodes)
+        {
+            auto const &dst_label(node_labels[dst_node]);
+            os << src_label << dst_label << fbg::g_separator_character;
+        }
+    }
+    
+    os << std::flush;
+    os.close();
+    
+    // Construct the CSA.
+    fbg::csa_type csa;
+    sdsl::construct(csa, temp_file.name(), 1);
+    
+    // Prepare the B and E bit vectors.
+    auto const csa_size(csa.size());
+    sdsl::bit_vector b_positions(csa_size, 0);
+    sdsl::bit_vector e_positions(csa_size, 0);
+    for (auto const &label : node_labels)
+    {
+        fbg::csa_type::size_type lhs{}, rhs{};
+        auto const match_count(
+            sdsl::backward_search(
+                csa,
+                0,
+                csa_size - 1,
+                label.begin(),
+                label.end(),
+                lhs,
+                rhs
+            )
+        );
+        assert(match_count);
+        b_positions[lhs] = 1;
+        e_positions[rhs] = 1;
+    }
+    
+    fbg::founder_block_index founder_block_index(
+        std::move(csa),
+        std::move(b_positions),
+        std::move(e_positions)
+    );
 }
 
 
 int main(int argc, char **argv) { 
-    if (argc <  2) {
-        std::cout << "Usage " << argv[0] << " MSA.fasta [GAPLIMIT]" << std::endl;
+    if (argc <  3) {
+        std::cout << "Usage " << argv[0] << " MSA.fasta index-output [GAPLIMIT]" << std::endl;
         std::cout << "    This program constructs a segment repeat-free founder block graph" << std::endl;
         std::cout << "    Input is MSA given in fasta format" << std::endl;
         std::cout << "    Rows with runs of gaps '-' or N's >= GAPLIMIT will be filtered out " << std::endl;
@@ -307,8 +431,8 @@ int main(int argc, char **argv) {
         return 1;
     }
     size_type GAPLIMIT=1; // Filtering out entries with too long gap regions
-    if (argc>2)
-        GAPLIMIT = atoi(argv[2]);
+    if (argc>3)
+        GAPLIMIT = atoi(argv[3]);
 
     auto start = chrono::high_resolution_clock::now();
 
@@ -322,11 +446,18 @@ int main(int argc, char **argv) {
     
     std::cout << "Index construction complete, index requires " << sdsl::size_in_mega_bytes(cst) << " MiB." << std::endl;
 
-    segment(MSA, cst);
+    std::vector <std::string> node_labels;
+    adjacency_list edges;
+    segment(MSA, cst, node_labels, edges);
+
+    std::cout << "Writing the index to disk…\n";
+    make_index(node_labels, edges, argv[2]);
 
     auto end = chrono::high_resolution_clock::now();
     auto duration = chrono::duration_cast<chrono::seconds>(end - start); 
   
     std::cout << "Time taken: "
          << duration.count() << " seconds" << std::endl;
+    
+    return EXIT_SUCCESS;
 }
