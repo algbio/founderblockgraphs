@@ -309,12 +309,16 @@ void segment(
     typedef std::vector<size_type> block_vector;
     typedef std::vector<block_vector> block_matrix;
     block_matrix blocks(boundaries.size());
-    for (size_type j=0; j<boundaries.size(); j++) {
+    for (size_type j=0; j<boundaries.size(); j++)
+    {
         for (size_type i=0; i<m; i++)
-            if (!str2id.count(MSA[i].substr(previndex,boundaries[j]-previndex+1))) {       
+        {
+            auto const label(MSA[i].substr(previndex,boundaries[j]-previndex+1));
+            if (!str2id.count(label)) {
                 blocks[j].push_back(nodecount);
-                str2id[MSA[i].substr(previndex,boundaries[j]-previndex+1)] = nodecount++;
+                str2id[label] = nodecount++;
             }
+        }
         previndex = boundaries[j]+1;
     }
 
@@ -336,9 +340,13 @@ void segment(
         for (size_type i=0; i<m; i++)
         {
             auto const &src_node_label(MSA[i].substr(previndex,boundaries[k]-previndex+1));
-            auto const &dst_node_label(MSA[i].substr(previndex,boundaries[k+1]-boundaries[k]+1));
-            auto const src_node_idx(str2id[src_node_label]);
-            auto const dst_node_idx(str2id[dst_node_label]);
+            auto const &dst_node_label(MSA[i].substr(1+boundaries[k],boundaries[k+1]-boundaries[k]+1));
+            auto const src_node_idx_it(str2id.find(src_node_label));
+            auto const dst_node_idx_it(str2id.find(dst_node_label));
+            assert(src_node_idx_it != str2id.end());
+            assert(dst_node_idx_it != str2id.end());
+            auto const src_node_idx(src_node_idx_it->second);
+            auto const dst_node_idx(dst_node_idx_it->second);
             edges[src_node_idx].insert(dst_node_idx);
         }
         previndex = boundaries[k]+1;
