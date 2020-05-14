@@ -372,7 +372,9 @@ void make_index(
     std::string const dirname(sdsl::util::dirname(dst_path));
     temporary_file temp_file(dirname);
     temp_file.open();
-    std::fstream os(temp_file.name());
+    std::fstream temp_os;
+    temp_os.exceptions(std::fstream::failbit);
+    temp_os.open(temp_file.name(), std::ios_base::out);
     
     // Write the index contents to it.
     for (std::size_t i(0), count(edges.size()); i < count; ++i)
@@ -387,12 +389,12 @@ void make_index(
         for (auto const dst_node : sorted_dst_nodes)
         {
             auto const &dst_label(node_labels[dst_node]);
-            os << src_label << dst_label << fbg::g_separator_character;
+            temp_os << src_label << dst_label << fbg::g_separator_character;
         }
     }
     
-    os << std::flush;
-    os.close();
+    temp_os << std::flush;
+    temp_os.close();
     
     // Construct the CSA.
     fbg::csa_type csa;
@@ -426,6 +428,12 @@ void make_index(
         std::move(b_positions),
         std::move(e_positions)
     );
+    
+    std::fstream index_os;
+    index_os.exceptions(std::fstream::failbit);
+    index_os.open(dst_path, std::ios_base::out);
+    founder_block_index.serialize(index_os);
+    index_os.close();
 }
 
 
