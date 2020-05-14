@@ -1,6 +1,7 @@
 include local.mk
 
-CXXFLAGS	+= -std=c++17 -O2 -Wall
+OPT_FLAGS	?= -O2
+CXXFLAGS	+= $(OPT_FLAGS) -std=c++17 -Wall
 CPPFLAGS	+= -I$(SDSL_ROOT)/include -I$(SDSL_ROOT)/external/libdivsufsort/include
 LDFLAGS		+= -L$(SDSL_ROOT)/lib -L$(SDSL_ROOT)/external/libdivsufsort/lib -lsdsl -ldivsufsort -ldivsufsort64
 
