@@ -6,15 +6,19 @@ LDFLAGS		+= -L$(SDSL_ROOT)/lib -L$(SDSL_ROOT)/external/libdivsufsort/lib -lsdsl 
 
 
 founderblockgraph_objects = founderblockgraph.o founder_block_index.o
+locate_patterns_objects = locate_patterns.o founder_block_index.o
 
 
-all: founderblockgraph
+all: founderblockgraph locate_patterns
 
 clean:
-	$(RM) founderblockgraph $(founder_block_index)
+	$(RM) founderblockgraph locate_patterns $(founder_block_index) $(locate_patterns_objects)
 
 founderblockgraph: $(founderblockgraph_objects)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(founderblockgraph_objects)
+
+locate_patterns: $(locate_patterns_objects)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(locate_patterns_objects)
 
 %.o: %.cpp
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) -o $@ $<
