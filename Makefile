@@ -12,7 +12,7 @@ locate_patterns_objects = locate_patterns.o founder_block_index.o
 all: founderblockgraph locate_patterns
 
 clean:
-	$(RM) founderblockgraph locate_patterns $(founder_block_index) $(locate_patterns_objects)
+	$(RM) founderblockgraph locate_patterns $(founderblockgraph_objects) $(locate_patterns_objects)
 
 founderblockgraph: $(founderblockgraph_objects)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(founderblockgraph_objects)
