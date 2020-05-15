@@ -51,6 +51,9 @@ struct gengetopt_args_info
   char * graphviz_output_arg;	/**< @brief Graphviz output path.  */
   char * graphviz_output_orig;	/**< @brief Graphviz output path original value given at command line.  */
   const char *graphviz_output_help; /**< @brief Graphviz output path help description.  */
+  char * memory_chart_output_arg;	/**< @brief Memory chart output path.  */
+  char * memory_chart_output_orig;	/**< @brief Memory chart output path original value given at command line.  */
+  const char *memory_chart_output_help; /**< @brief Memory chart output path help description.  */
   
   unsigned int help_given ;	/**< @brief Whether help was given.  */
   unsigned int version_given ;	/**< @brief Whether version was given.  */
@@ -58,6 +61,7 @@ struct gengetopt_args_info
   unsigned int output_given ;	/**< @brief Whether output was given.  */
   unsigned int gap_limit_given ;	/**< @brief Whether gap-limit was given.  */
   unsigned int graphviz_output_given ;	/**< @brief Whether graphviz-output was given.  */
+  unsigned int memory_chart_output_given ;	/**< @brief Whether memory-chart-output was given.  */
 
 } ;
 

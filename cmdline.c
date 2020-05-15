@@ -40,6 +40,7 @@ const char *gengetopt_args_info_help[] = {
   "      --output=filename         Index output path",
   "      --gap-limit=GAPLIMIT      Gap limit  (default=`1')",
   "      --graphviz-output=filename\n                                Graphviz output path",
+  "      --memory-chart-output=filename\n                                Memory chart output path",
     0
 };
 
@@ -72,6 +73,7 @@ void clear_given (struct gengetopt_args_info *args_info)
   args_info->output_given = 0 ;
   args_info->gap_limit_given = 0 ;
   args_info->graphviz_output_given = 0 ;
+  args_info->memory_chart_output_given = 0 ;
 }
 
 static
@@ -86,6 +88,8 @@ void clear_args (struct gengetopt_args_info *args_info)
   args_info->gap_limit_orig = NULL;
   args_info->graphviz_output_arg = NULL;
   args_info->graphviz_output_orig = NULL;
+  args_info->memory_chart_output_arg = NULL;
+  args_info->memory_chart_output_orig = NULL;
   
 }
 
@@ -100,6 +104,7 @@ void init_args_info(struct gengetopt_args_info *args_info)
   args_info->output_help = gengetopt_args_info_help[3] ;
   args_info->gap_limit_help = gengetopt_args_info_help[4] ;
   args_info->graphviz_output_help = gengetopt_args_info_help[5] ;
+  args_info->memory_chart_output_help = gengetopt_args_info_help[6] ;
   
 }
 
@@ -190,6 +195,8 @@ cmdline_parser_release (struct gengetopt_args_info *args_info)
   free_string_field (&(args_info->gap_limit_orig));
   free_string_field (&(args_info->graphviz_output_arg));
   free_string_field (&(args_info->graphviz_output_orig));
+  free_string_field (&(args_info->memory_chart_output_arg));
+  free_string_field (&(args_info->memory_chart_output_orig));
   
   
 
@@ -232,6 +239,8 @@ cmdline_parser_dump(FILE *outfile, struct gengetopt_args_info *args_info)
     write_into_file(outfile, "gap-limit", args_info->gap_limit_orig, 0);
   if (args_info->graphviz_output_given)
     write_into_file(outfile, "graphviz-output", args_info->graphviz_output_orig, 0);
+  if (args_info->memory_chart_output_given)
+    write_into_file(outfile, "memory-chart-output", args_info->memory_chart_output_orig, 0);
   
 
   i = EXIT_SUCCESS;
@@ -522,6 +531,7 @@ cmdline_parser_internal (
         { "output",	1, NULL, 0 },
         { "gap-limit",	1, NULL, 0 },
         { "graphviz-output",	1, NULL, 0 },
+        { "memory-chart-output",	1, NULL, 0 },
         { 0,  0, 0, 0 }
       };
 
@@ -595,6 +605,20 @@ cmdline_parser_internal (
                 &(local_args_info.graphviz_output_given), optarg, 0, 0, ARG_STRING,
                 check_ambiguity, override, 0, 0,
                 "graphviz-output", '-',
+                additional_error))
+              goto failure;
+          
+          }
+          /* Memory chart output path.  */
+          else if (strcmp (long_options[option_index].name, "memory-chart-output") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->memory_chart_output_arg), 
+                 &(args_info->memory_chart_output_orig), &(args_info->memory_chart_output_given),
+                &(local_args_info.memory_chart_output_given), optarg, 0, 0, ARG_STRING,
+                check_ambiguity, override, 0, 0,
+                "memory-chart-output", '-',
                 additional_error))
               goto failure;
           

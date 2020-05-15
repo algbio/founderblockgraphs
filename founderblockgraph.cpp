@@ -366,7 +366,8 @@ void segment(
 void make_index(
     std::vector <std::string> node_labels,
     adjacency_list edges,
-    char const *dst_path_c
+    char const *dst_path_c,
+    char const *mem_chart_path_c
 ) {
     // Create a temporary file.
     std::string const dst_path(dst_path_c);
@@ -430,6 +431,17 @@ void make_index(
         std::move(e_positions)
     );
     
+    // Write the memory chart if needed.
+    if (mem_chart_path_c)
+    {
+        std::fstream mem_chart_os;
+        mem_chart_os.exceptions(std::fstream::failbit);
+        mem_chart_os.open(mem_chart_path_c, std::ios_base::out);
+        sdsl::write_structure<sdsl::HTML_FORMAT>(founder_block_index, mem_chart_os);
+        mem_chart_os.close();
+    }
+    
+    // Write the index.
     std::fstream index_os;
     index_os.exceptions(std::fstream::failbit);
     index_os.open(dst_path, std::ios_base::out);
@@ -531,7 +543,7 @@ int main(int argc, char **argv) {
     segment(MSA, cst, node_labels, edges);
     
     std::cout << "Writing the index to disk…\n";
-    make_index(node_labels, edges, args_info.output_arg);
+    make_index(node_labels, edges, args_info.output_arg, args_info.memory_chart_output_arg);
 
     auto end = chrono::high_resolution_clock::now();
     auto duration = chrono::duration_cast<chrono::seconds>(end - start);
@@ -541,7 +553,7 @@ int main(int argc, char **argv) {
         std::cout << "Writing the Graphviz file…\n";
         output_graphviz(node_labels, edges, args_info.graphviz_output_arg);
     }
-  
+    
     std::cout << "Time taken: "
          << duration.count() << " seconds" << std::endl;
     
