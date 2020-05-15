@@ -6,7 +6,7 @@ OPT_FLAGS	?= -O2
 CFLAGS		+= $(OPT_FLAGS) -std=c99 -Wall
 CXXFLAGS	+= $(OPT_FLAGS) -std=c++17 -Wall
 CPPFLAGS	+= -I$(SDSL_ROOT)/include -I$(SDSL_ROOT)/external/libdivsufsort/include
-LDFLAGS		+= -L$(SDSL_ROOT)/lib -L$(SDSL_ROOT)/external/libdivsufsort/lib -lsdsl -ldivsufsort -ldivsufsort64
+STATIC_LIBRARIES = $(SDSL_ROOT)/external/libdivsufsort/lib/libdivsufsort.a $(SDSL_ROOT)/external/libdivsufsort/lib/libdivsufsort64.a $(SDSL_ROOT)/lib/libsdsl.a
 
 
 founderblockgraph_objects = cmdline.o founderblockgraph.o founder_block_index.o
@@ -19,10 +19,10 @@ clean:
 	$(RM) founderblockgraph locate_patterns $(founderblockgraph_objects) $(locate_patterns_objects)
 
 founderblockgraph: $(founderblockgraph_objects)
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(founderblockgraph_objects)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(founderblockgraph_objects) $(STATIC_LIBRARIES)
 
 locate_patterns: $(locate_patterns_objects)
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(locate_patterns_objects)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(locate_patterns_objects) $(STATIC_LIBRARIES)
 
 founderblockgraph.cc: cmdline.c
 
@@ -32,5 +32,5 @@ founderblockgraph.cc: cmdline.c
 %.o: %.c
 	$(CC) -c $(CPPFLAGS) $(CFLAGS) -o $@ $<
 
-%.c: %.ggo
-	$(GENGETOPT) --input="$<"
+#%.c: %.ggo
+#	$(GENGETOPT) --input="$<"

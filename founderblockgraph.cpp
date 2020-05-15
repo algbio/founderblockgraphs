@@ -79,7 +79,7 @@ size_type count(std::string const &P,std::string const &T) {
     return result;  
 }
 
-std::string gaps_out(std:: string const &S) {
+std::string remove_gaps(std:: string const &S) {
     std::string result = "";
     for (size_type i=0; i<S.size(); i++) 
         if (S[i]!='-')
@@ -310,14 +310,13 @@ void segment(
     typedef std::vector<size_type> block_vector;
     typedef std::vector<block_vector> block_matrix;
     block_matrix blocks(boundaries.size());
-    for (size_type j=0; j<boundaries.size(); j++)
-    {
-        for (size_type i=0; i<m; i++)
-        {
-            auto const label(MSA[i].substr(previndex,boundaries[j]-previndex+1));
-            if (!str2id.count(label)) {
+    std::string ellv, ellw;
+    for (size_type j=0; j<boundaries.size(); j++) {
+        for (size_type i=0; i<m; i++) {
+            ellv = remove_gaps(MSA[i].substr(previndex,boundaries[j]-previndex+1));   
+            if (!str2id.count(ellv)) {       
                 blocks[j].push_back(nodecount);
-                str2id[label] = nodecount++;
+                str2id[ellv] = nodecount++;
             }
         }
         previndex = boundaries[j]+1;
@@ -333,6 +332,24 @@ void segment(
 
     std::cout << "#nodes=" << nodecount << std::endl;
     std::cout << "total length of node labels=" << totallength << std::endl; 
+
+    size_type nfounders=0;
+    for (size_type j=0; j<boundaries.size(); j++)
+        if (blocks[j].size()>nfounders)
+            nfounders = blocks[j].size();
+    std::cout << "#founders=" << nfounders << std::endl;
+/***
+    typedef std::unordered_map<size_type, size_type> edge_map;
+    typedef std::vector<edge_map> edge_map_vector;
+    edge_map_vector edges(nodecount);
+    previndex = 0;
+    for (size_type k=0; k<boundaries.size()-1; k++) {
+        for (size_type i=0; i<m; i++) {
+            ellv = remove_gaps(MSA[i].substr(previndex,boundaries[k]-previndex+1));
+            ellw = remove_gaps(MSA[i].substr(boundaries[k]+1,boundaries[k+1]-boundaries[k]));  
+            edges[str2id[ellv]][str2id[ellw]] = 1;
+        }  
+*/
     
     adjacency_list edges(nodecount);
     previndex = 0;
@@ -340,8 +357,11 @@ void segment(
     {
         for (size_type i=0; i<m; i++)
         {
-            auto const &src_node_label(MSA[i].substr(previndex,boundaries[k]-previndex+1));
-            auto const &dst_node_label(MSA[i].substr(1+boundaries[k],boundaries[k+1]-boundaries[k]));
+
+            ellv = remove_gaps(MSA[i].substr(previndex,boundaries[k]-previndex+1));
+            ellw = remove_gaps(MSA[i].substr(boundaries[k]+1,boundaries[k+1]-boundaries[k]));  
+            auto const &src_node_label(ellv);
+            auto const &dst_node_label(ellw);
             auto const src_node_idx_it(str2id.find(src_node_label));
             auto const dst_node_idx_it(str2id.find(dst_node_label));
             assert(src_node_idx_it != str2id.end());
@@ -350,6 +370,7 @@ void segment(
             auto const dst_node_idx(dst_node_idx_it->second);
             edges[src_node_idx].insert(dst_node_idx);
         }
+
         previndex = boundaries[k]+1;
     }
     size_type edgecount = 0;
@@ -385,7 +406,7 @@ void make_index(
         
         // Make sure that the destination nodes are sorted.
         auto const &dst_nodes(edges[i]);
-        std::vector sorted_dst_nodes(dst_nodes.begin(), dst_nodes.end());
+        std::vector <size_type> sorted_dst_nodes(dst_nodes.begin(), dst_nodes.end());
         std::sort(sorted_dst_nodes.begin(), sorted_dst_nodes.end());
         
         for (auto const dst_node : sorted_dst_nodes)
