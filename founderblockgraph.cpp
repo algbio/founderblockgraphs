@@ -340,7 +340,7 @@ void segment(
         for (size_type i=0; i<m; i++)
         {
             auto const &src_node_label(MSA[i].substr(previndex,boundaries[k]-previndex+1));
-            auto const &dst_node_label(MSA[i].substr(1+boundaries[k],boundaries[k+1]-boundaries[k]+1));
+            auto const &dst_node_label(MSA[i].substr(1+boundaries[k],boundaries[k+1]-boundaries[k]));
             auto const src_node_idx_it(str2id.find(src_node_label));
             auto const dst_node_idx_it(str2id.find(dst_node_label));
             assert(src_node_idx_it != str2id.end());
@@ -465,7 +465,7 @@ int main(int argc, char **argv) {
     std::vector <std::string> node_labels;
     adjacency_list edges;
     segment(MSA, cst, node_labels, edges);
-
+    
     std::cout << "Writing the index to disk…\n";
     make_index(node_labels, edges, argv[2]);
 
