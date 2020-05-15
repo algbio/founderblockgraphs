@@ -1,0 +1,27 @@
+#
+# founderblockgraph
+# Copyright (C) 2020 Tuukka Norri
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+package		"founderblockgraphs"
+version		"0.1"
+purpose		"Constructs a segment repeat-free founder block graph"
+usage		"founderblockgraph --input=MSA.fasta --output=MSA.index [--gap-limit=GAPLIMIT] [--graphviz-output=…]"
+description	"Input is MSA given in fasta format. Rows with runs of gaps ‘-’ or N’s ≥ GAPLIMIT will be filtered out"
+
+option	"input"				-	"MSA input path"		string	typestr = "filename"					required
+option	"output"			-	"Index output path"		string	typestr	= "filename"					required
+option	"gap-limit"			-	"Gap limit"				long	typestr = "GAPLIMIT"	default = "1"	optional
+option	"graphviz-output"	-	"Graphviz output path"	string	typestr = "filename"					optional

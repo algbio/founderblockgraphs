@@ -11,16 +11,17 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include "cmdline.h"
 #include "founder_block_index.hpp"
 
 /*
-  Reads MSA in fasta format from argv[1]
+  Reads MSA in fasta format as given in --input
   Finds a segment repeat-free segmentation
   Converts the segmentation into a founder block graph
 */
 
 /* To use, install sdsl-lite: https://github.com/simongog/sdsl-lite,
-   copy this file to its examples subfolder, and run make */
+   modify the Makefile, and run make */
 
 /* Copyright (C) 2020 Veli Mäkinen under GNU General Public License v3.0 */
 
@@ -437,27 +438,90 @@ void make_index(
 }
 
 
-int main(int argc, char **argv) { 
-    if (argc <  3) {
-        std::cout << "Usage " << argv[0] << " MSA.fasta index-output [GAPLIMIT]" << std::endl;
-        std::cout << "    This program constructs a segment repeat-free founder block graph" << std::endl;
-        std::cout << "    Input is MSA given in fasta format" << std::endl;
-        std::cout << "    Rows with runs of gaps '-' or N's >= GAPLIMIT will be filtered out " << std::endl;
-        std::cout << "    By default GAPLIMIT=1. With GAPLIMIT=0, filtering is skipped " << std::endl;
-        return 1;
+void output_graphviz_label(std::ostream &os, std::string const &label) {
+    for (auto const c : label)
+    {
+        if ('"' == c)
+            os << "\\\"";
+        else
+            os << c;
     }
-    size_type GAPLIMIT=1; // Filtering out entries with too long gap regions
-    if (argc>3)
-        GAPLIMIT = atoi(argv[3]);
+}
 
+
+void output_graphviz(
+    std::vector <std::string> node_labels,
+    adjacency_list edges,
+    char const *dst_path
+) {
+    std::fstream os;
+    os.exceptions(std::fstream::failbit);
+    os.open(dst_path, std::ios_base::out);
+    
+    os << "digraph founder_block_graph {\n";
+    os << "rankdir=\"LR\"\n";
+    
+    // Node labels.
+    {
+        std::size_t i(0);
+        for (auto const &label : node_labels)
+        {
+            os << 'n' << i << " [label = \"";
+            output_graphviz_label(os, label);
+            os << "\"];\n";
+            ++i;
+        }
+    }
+    
+    // Edges.
+    {
+        auto const count(edges.size());
+        for (std::size_t i(0); i < count; ++i)
+        {
+            auto const &dst_nodes(edges[i]);
+            if (!dst_nodes.empty())
+            {
+                os << 'n' << i << " -> {";
+                bool is_first(true);
+                for (auto const dst_node : dst_nodes)
+                {
+                    if (is_first)
+                        is_first = false;
+                    else
+                        os << " ; ";
+                    os << 'n' << dst_node;
+                }
+                os << "}\n";
+            }
+        }
+    }
+    
+    os << "}\n";
+    os.close();
+}
+
+
+int main(int argc, char **argv) { 
+
+    gengetopt_args_info args_info;
+    if (0 != cmdline_parser(argc, argv, &args_info))
+        return EXIT_FAILURE;
+    
+    auto const gap_limit(args_info.gap_limit_arg);
+    if (gap_limit <= 0)
+    {
+        std::cerr << "Gap limit needs to be non-negative.\n";
+        return EXIT_FAILURE;
+    }
+    
     auto start = chrono::high_resolution_clock::now();
 
     std::vector<std::string> MSA;
-    read_input(argv[1], GAPLIMIT, MSA);
+    read_input(args_info.input_arg, gap_limit, MSA);
     std::cout << "Input MSA[1.." << MSA.size() << ",1.." << MSA[0].size() << "]" << std::endl;
     
     cst_type cst;
-    if (!load_cst(argv[1], MSA, cst, GAPLIMIT))
+    if (!load_cst(args_info.input_arg, MSA, cst, gap_limit))
         return EXIT_FAILURE;
     
     std::cout << "Index construction complete, index requires " << sdsl::size_in_mega_bytes(cst) << " MiB." << std::endl;
@@ -467,10 +531,16 @@ int main(int argc, char **argv) {
     segment(MSA, cst, node_labels, edges);
     
     std::cout << "Writing the index to disk…\n";
-    make_index(node_labels, edges, argv[2]);
+    make_index(node_labels, edges, args_info.output_arg);
 
     auto end = chrono::high_resolution_clock::now();
-    auto duration = chrono::duration_cast<chrono::seconds>(end - start); 
+    auto duration = chrono::duration_cast<chrono::seconds>(end - start);
+    
+    if (args_info.graphviz_output_given)
+    {
+        std::cout << "Writing the Graphviz file…\n";
+        output_graphviz(node_labels, edges, args_info.graphviz_output_arg);
+    }
   
     std::cout << "Time taken: "
          << duration.count() << " seconds" << std::endl;
