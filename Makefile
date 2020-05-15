@@ -32,5 +32,5 @@ founderblockgraph.cc: cmdline.c
 %.o: %.c
 	$(CC) -c $(CPPFLAGS) $(CFLAGS) -o $@ $<
 
-%.c: %.ggo
-	$(GENGETOPT) --input="$<"
+#%.c: %.ggo
+#	$(GENGETOPT) --input="$<"
