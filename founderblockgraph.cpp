@@ -405,7 +405,7 @@ void make_index(
         
         // Make sure that the destination nodes are sorted.
         auto const &dst_nodes(edges[i]);
-        std::vector sorted_dst_nodes(dst_nodes.begin(), dst_nodes.end());
+        std::vector <size_type> sorted_dst_nodes(dst_nodes.begin(), dst_nodes.end());
         std::sort(sorted_dst_nodes.begin(), sorted_dst_nodes.end());
         
         for (auto const dst_node : sorted_dst_nodes)
