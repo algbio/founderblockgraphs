@@ -35,7 +35,7 @@ size_type count(std::string const &P,std::string const &T) {
     return result;  
 }
 
-std::string gaps_out(std:: string const &S) {
+std::string remove_gaps(std:: string const &S) {
     std::string result = "";
     for (size_type i=0; i<S.size(); i++) 
         if (S[i]!='-')
@@ -261,12 +261,15 @@ void segment(std::vector<std::string> const &MSA, cst_type const &cst) {
     typedef std::vector<size_type> block_vector;
     typedef std::vector<block_vector> block_matrix;
     block_matrix blocks(boundaries.size());
+    std::string ellv, ellw;
     for (size_type j=0; j<boundaries.size(); j++) {
-        for (size_type i=0; i<m; i++)
-            if (!str2id.count(MSA[i].substr(previndex,boundaries[j]-previndex+1))) {       
+        for (size_type i=0; i<m; i++) {
+            ellv = remove_gaps(MSA[i].substr(previndex,boundaries[j]-previndex+1));   
+            if (!str2id.count(ellv)) {       
                 blocks[j].push_back(nodecount);
-                str2id[MSA[i].substr(previndex,boundaries[j]-previndex+1)] = nodecount++;
+                str2id[ellv] = nodecount++;
             }
+        }
         previndex = boundaries[j]+1;
     }
 
@@ -280,14 +283,23 @@ void segment(std::vector<std::string> const &MSA, cst_type const &cst) {
 
     std::cout << "#nodes=" << nodecount << std::endl;
     std::cout << "total length of node labels=" << totallength << std::endl; 
-    
+
+    size_type nfounders=0;
+    for (size_type j=0; j<boundaries.size(); j++)
+        if (blocks[j].size()>nfounders)
+            nfounders = blocks[j].size();
+    std::cout << "#founders=" << nfounders << std::endl;
+
     typedef std::unordered_map<size_type, size_type> edge_map;
     typedef std::vector<edge_map> edge_map_vector;
     edge_map_vector edges(nodecount);
     previndex = 0;
     for (size_type k=0; k<boundaries.size()-1; k++) {
-        for (size_type i=0; i<m; i++)
-            edges[str2id[MSA[i].substr(previndex,boundaries[k]-previndex+1)]][str2id[MSA[i].substr(previndex,boundaries[k+1]-boundaries[k]+1)]] = 1;
+        for (size_type i=0; i<m; i++) {
+            ellv = remove_gaps(MSA[i].substr(previndex,boundaries[k]-previndex+1));
+            ellw = remove_gaps(MSA[i].substr(boundaries[k]+1,boundaries[k+1]-boundaries[k]));  
+            edges[str2id[ellv]][str2id[ellw]] = 1;
+        }  
         previndex = boundaries[k]+1;
     }
     size_type edgecount = 0;
