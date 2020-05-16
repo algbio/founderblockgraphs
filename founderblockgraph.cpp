@@ -89,6 +89,9 @@ std::string remove_gaps(std:: string const &S) {
 
 bool check_gaps(std::string const &sequence, std::size_t gap_limit)
 {
+    if (0 == gap_limit)
+        return true;
+    
     std::size_t gaprun(0);
     std::size_t maxgaprun(0);
     for (auto const c : sequence)
@@ -107,25 +110,53 @@ bool check_gaps(std::string const &sequence, std::size_t gap_limit)
 }
 
 
+bool check_sequence_length(std::string const &identifier, std::string const &seq, std::size_t expected_length)
+{
+    if (seq.size() == expected_length)
+        return true;
+    
+    std::cerr << "WARNING: length of the sequence “" << identifier.substr(1) << "” does not match that of the first sequence; skipping. (" << expected_length << " vs. " << seq.size() << ")\n";
+    return false;
+}
+
+
 void read_input(char const *input_path, std::size_t gap_limit, std::vector<std::string> &MSA) {
-    std::string line, entry;
+    std::string line, identifier, entry;
 
     // Reading input fasta
     std::fstream fs;
     fs.open(input_path, std::fstream::in);
-    std::getline(fs,line); // assuming header first
+    std::getline(fs, identifier); // assuming header first
+    
+    std::size_t expected_length(0);
+    bool is_first(true);
     while (std::getline(fs, line)) {
         if (line[0] == '>') { // header
-            if (gap_limit==0 || check_gaps(entry, gap_limit))
+            if (is_first)
+            {
+                expected_length = entry.size();
+                is_first = false;
+            }
+            
+            if (check_sequence_length(identifier, entry, expected_length) &&
+                check_gaps(entry, gap_limit))
+            {
                 MSA.push_back(entry);
+            }
             entry.clear();
-        }        
+            identifier = line;
+        }
         else
+        {
             entry += line;
+        }
     }
     fs.close();
-    if (check_gaps(entry, gap_limit))
-        MSA.push_back(entry); 
+    if (check_sequence_length(identifier, entry, expected_length) &&
+        check_gaps(entry, gap_limit))
+    {
+        MSA.push_back(entry);
+    }
 }
 
 
@@ -253,6 +284,7 @@ void segment(
             bwt2row.clear();
             for (size_type i=0; i<m; i++) {
                 // Keeping old range on gap symbols
+                assert(jp < MSA[i].size());
                 if (MSA[i][jp]!='-') {
                     sdsl::backward_search(cst.csa,sp[i],ep[i],MSA[i][jp],sp[i],ep[i]);
                     lcp[i]++;
@@ -539,6 +571,8 @@ int main(int argc, char **argv) {
     gengetopt_args_info args_info;
     if (0 != cmdline_parser(argc, argv, &args_info))
         return EXIT_FAILURE;
+    
+    std::ios_base::sync_with_stdio(false);    // Don't use C style IO after calling cmdline_parser.
     
     auto const gap_limit(args_info.gap_limit_arg);
     if (gap_limit <= 0)
