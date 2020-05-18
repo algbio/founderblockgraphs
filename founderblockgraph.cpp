@@ -432,11 +432,15 @@ void make_index(
     temp_os.open(temp_file.name(), std::ios_base::out);
     
     // Write the index contents to it.
-    for (std::size_t i(0), count(edges.size()); i < count; ++i)
+    // Also keep track of node occurrences.
+    assert(edges.size() == node_labels.size());
+    std::vector <std::size_t> dst_occurrences(node_labels.size(), 0);
+    for (std::size_t i(0), count(node_labels.size()); i < count; ++i)
     {
         auto const &src_label(node_labels[i]);
         
         // Make sure that the destination nodes are sorted.
+        // This is not necessary for the algorithm to work but is useful for debugging purposes.
         auto const &dst_nodes(edges[i]);
         std::vector <size_type> sorted_dst_nodes(dst_nodes.begin(), dst_nodes.end());
         std::sort(sorted_dst_nodes.begin(), sorted_dst_nodes.end());
@@ -444,7 +448,8 @@ void make_index(
         for (auto const dst_node : sorted_dst_nodes)
         {
             auto const &dst_label(node_labels[dst_node]);
-            temp_os << src_label << dst_label << fbg::g_separator_character;
+            temp_os << fbg::g_separator_character << src_label << dst_label;
+            ++dst_occurrences[dst_node];
         }
     }
     
@@ -459,8 +464,10 @@ void make_index(
     auto const csa_size(csa.size());
     sdsl::bit_vector b_positions(csa_size, 0);
     sdsl::bit_vector e_positions(csa_size, 0);
-    for (auto const &label : node_labels)
+    for (std::size_t i(0), count(node_labels.size()); i < count; ++i)
     {
+        auto const &label(node_labels[i]);
+        
         fbg::csa_type::size_type lhs{}, rhs{};
         auto const match_count(
             sdsl::backward_search(
@@ -473,7 +480,76 @@ void make_index(
                 rhs
             )
         );
-        assert(match_count);
+        
+        // Check by searching the separator character.
+        if (match_count != (edges[i].size() + dst_occurrences[i]))
+        {
+            std::cerr << "Got unexpected match count " << match_count << " for node " << i << " with label “" << label << "”\n";
+            std::cerr << "Actual in-edges: " << dst_occurrences[i] << " out-edges: " << edges[i].size() << "\n";
+            std::cerr << "Lexicographic range: " << lhs << ", " << rhs << '\n';
+            std::vector <char> buffer;
+            std::cerr << "Suffixes:\n";
+            for (size_type i(lhs); i <= rhs; ++i)
+            {
+                auto const text_pos(csa[i]);
+                auto const end_pos(std::min(text_pos + 100, csa.size() - 1));
+                
+                buffer.clear();
+                buffer.resize(100, '\0');
+                auto const count(sdsl::extract(csa, text_pos, end_pos, buffer.begin()));
+                std::cerr << "i: " << i << "\ttext: ";
+                for (size_type j(0); j < count; ++j)
+                    std::cerr << buffer[j];
+                std::cerr << '\n';
+            }
+            std::cerr << "Out-edges:\n";
+            for (auto const dst_node : edges[i])
+                std::cerr << dst_node << '\t' << node_labels[dst_node] << '\n';
+            
+            {
+                std::cerr << "Preceding characters:\n";
+                auto const sigma(csa.wavelet_tree.sigma);
+                std::vector<fbg::csa_type::wavelet_tree_type::value_type> cs(sigma, 0);
+                size_type symbol_count(0);
+                std::vector <size_type> r1(sigma, 0), r2(sigma, 0);
+                sdsl::interval_symbols(csa.wavelet_tree, lhs, rhs, symbol_count, cs, r1, r2);
+                for (std::size_t j(0); j < symbol_count; ++j)
+                    std::cerr << "‘" << cs[j] << "’ (" << int(cs[j]) << ")\n";
+            }
+            
+            // Output a sample of the node labels, too.
+            // We use binary search here instead of constructing a BWT index of the node labels only.
+            {
+                typedef std::pair<std::size_t, std::string> label_pair;
+                typedef std::vector<label_pair> label_pair_vector;
+                label_pair_vector sorted_node_labels(node_labels.size());
+                for (std::size_t j(0), count(node_labels.size()); j < count; ++j)
+                {
+                    sorted_node_labels[j] = label_pair(j, node_labels[j]);
+                    std::sort(sorted_node_labels.begin(), sorted_node_labels.end(), [](auto const &lhs, auto const &rhs){
+                        return lhs.second < rhs.second;
+                    });
+                }
+                
+                // Find the problematic label.
+                auto const range(std::equal_range(sorted_node_labels.begin(), sorted_node_labels.end(), label_pair(0, label), [](auto const &lhs, auto const &rhs){
+                    return lhs.second < rhs.second;
+                }));
+                typedef label_pair_vector::difference_type diff_type;
+                auto it(range.first - std::min(diff_type(5), std::distance(sorted_node_labels.begin(), range.first)));
+                auto const end(range.second + std::min(diff_type(5), std::distance(range.second, sorted_node_labels.end())));
+                                 
+                std::cerr << "Sample of node labels:\n";
+                while (it != end)
+                {
+                    std::cerr << it->first << '\t' << it->second << '\n';
+                    ++it;
+                }
+            }
+            
+            abort();
+        }
+        
         b_positions[lhs] = 1;
         e_positions[rhs] = 1;
     }
