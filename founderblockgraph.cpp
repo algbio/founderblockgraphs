@@ -18,6 +18,7 @@
   Reads MSA in fasta format as given in --input
   Finds a segment repeat-free segmentation
   Converts the segmentation into a founder block graph
+  See https://arxiv.org/abs/2005.09342
 */
 
 /* To use, install sdsl-lite: https://github.com/simongog/sdsl-lite,
