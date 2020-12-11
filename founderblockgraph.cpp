@@ -200,6 +200,20 @@ bool load_cst(char const *input_path, std::vector<std::string> const &MSA, cst_t
     return true;
 }
 
+struct Interval
+{
+    size_type sp;
+    size_type ep;
+
+    Interval(size_type l, size_type r) : sp(l), ep(r) {}
+
+    bool operator < (const Interval& inv) const
+    {
+       if (sp<inv.sp) return 1;
+       else if (sp==inv.sp && ep>inv.ep) return 1;
+       else return 0;
+    }
+};
 
 void segment(
     std::vector<std::string> const &MSA,
@@ -209,32 +223,27 @@ void segment(
 ) {
 
     size_type n = MSA[0].size();
-    size_type N = cst.csa.size();
 
     /* v[j] is such that MSA[1..m][v[j]..j] is a repeat-free segment */
     /* The following computes it naively. 
        This is a preprocessing part of the main algorithm */
 
     std::vector<size_type> v(n, 0);
-    std::unordered_map<size_type,size_type> bwt2row;
-    /* bwt2row[(sp,ep)]=i maps BWT[sp..ep] to the row of MSA */
 
     size_type m = MSA.size();
     std::vector<size_type> sp(m, 0);
     std::vector<size_type> ep(m, cst.csa.size()-1);
     std::vector<size_type> lcp(m, 0);
-    std::vector<bool> nested(m,false);
+    std::vector<Interval> pairs;
     /* [sp[i]..ep[i]] maintains BWT interval of MSA[i][jp..j] */
     /* lcp[i] = j-jp+1 minus the number of gap symbols in that range*/
-    /* nested[i] tells whether current interval is nested in another */
-
+    /* pairs contains (sp[i],ep[i]) and is used for sorting the intervals */
     size_type jp = n; // maintains the left-boundary 
     size_type sum;
     for (size_type j=n-1; j+1>0; j--) {
         v[j] = j+1; // no valid range found
         if (j<n-1) {  
             /* contracting MSA[i][j] from right for all i */
-            bwt2row.clear();
             for (size_type i=0; i<m; i++) {
                 /* mapping BWT range to suffix tree node,
                    taking parent, mapping back if parent is not too far*/
@@ -251,38 +260,36 @@ void segment(
                        ep[i] = cst.rb(u);
                     }
                 } 
-                bwt2row[sp[i]*N+ep[i]] = i;
             }
         }   
         while (1) {
-            bool nestedness = false; 
-            // checking nestedness
-            // TODO: this takes m^2 time, could be done faster
-            for (const auto& pair1 : bwt2row) {
-                /* (key=(sa[i],ep[i]), value=i) = (pair.first, pair.second) */              
-                nested[pair1.second] = false;
-                for (const auto& pair2 : bwt2row)
-                    if (pair1!=pair2 && sp[pair1.second]>=sp[pair2.second] && ep[pair1.second]<=ep[pair2.second]) {
-                       nested[pair1.second] = true; // extensions to the left may not help  
-                       nestedness = true;     
-                    }   
-            }   
+            /* Now checking if the union of intervals is of size m */
+            /* If that is the case, we have found v(j), otherwise continue left-extensions */
+            /* Intervals are distinct or nested, proper overlaps are impossible */
+            /* We can thus sort primarily by smallest left-boundary and secondary by largest right-boundary*/     
+            /* Then intervals get nested, and we can just sum the sizes of the out-most intervals*/     
+            pairs.clear();
+            for (size_type i=0; i<m; i++)            
+               pairs.push_back(Interval(sp[i],ep[i]));
+            std::sort(pairs.begin(),pairs.end());
             sum = 0;
-            for (const auto& pair : bwt2row)
-                /* (key=(sa[i],ep[i]), value=i) = (pair.first, pair.second) */
-                if (!nested[pair.second])
-                    sum += ep[pair.second]-sp[pair.second]+1;
-            if (!nestedness && sum == m) { // no non-aligned matches
+            size_type spprev = pairs[0].sp;
+            size_type epprev = pairs[0].ep;
+            for (size_type i=1; i<m; i++)
+               if (pairs[i].sp>epprev) {
+                   sum += epprev-spprev+1;
+                   spprev= pairs[i].sp; 
+                   epprev = pairs[i].ep;          
+               }   
+            sum += epprev-spprev+1;  
+            if (sum == m) { // no non-aligned matches
                 v[j]=jp;
                 break;
             }    
-            if (nestedness && sum == m) // no other non-aligned matches than nested
-                break;
             if (jp==0) // cannot go more to the left
                 break;        
             jp--; 
             /* Now looking at MSA[1..m][jp..j] */
-            bwt2row.clear();
             for (size_type i=0; i<m; i++) {
                 // Keeping old range on gap symbols
                 assert(jp < MSA[i].size());
@@ -290,7 +297,6 @@ void segment(
                     sdsl::backward_search(cst.csa,sp[i],ep[i],MSA[i][jp],sp[i],ep[i]);
                     lcp[i]++;
                 }
-                bwt2row[sp[i]*N+ep[i]]=i;
             }
         } 
     }  
@@ -576,7 +582,7 @@ int main(int argc, char **argv) {
     std::ios_base::sync_with_stdio(false);    // Don't use C style IO after calling cmdline_parser.
     
     auto const gap_limit(args_info.gap_limit_arg);
-    if (gap_limit <= 0)
+    if (gap_limit < 0)
     {
         std::cerr << "Gap limit needs to be non-negative.\n";
         return EXIT_FAILURE;
