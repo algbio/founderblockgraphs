@@ -19,6 +19,7 @@
 #include <fstream>
 #include <iostream>
 #include "founder_block_index.hpp"
+#include "locate_patterns_cmdline.h"
 
 
 namespace fbg = founder_block_graph;
@@ -26,17 +27,17 @@ namespace fbg = founder_block_graph;
 
 int main(int argc, char **argv)
 {
-    if (argc < 2)
-    {
-        std::cerr << "Usage: locate_partterns index_file\n";
+    gengetopt_args_info args_info;
+    if (0 != cmdline_parser(argc, argv, &args_info))
         return EXIT_FAILURE;
-    }
+    
+    std::ios_base::sync_with_stdio(false);    // Don't use C style IO after calling cmdline_parser.
     
     fbg::founder_block_index index;
     
     {
         std::fstream index_is;
-        index_is.open(argv[1], std::fstream::in);
+        index_is.open(args_info.index_arg, std::fstream::in);
         index.load(index_is);
     }
     
@@ -52,5 +53,11 @@ int main(int argc, char **argv)
         
         auto const occurrences(index.backward_search(pattern.rbegin(), pattern.rend()));
         std::cout << occurrences << " occurrences found.\n";
+
+		if (args_info.error_on_not_found_flag && 0 == occurrences)
+		{
+			std::cerr << "ERROR: pattern not found.\n";
+			return EXIT_FAILURE;
+		}
     }
 }

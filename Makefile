@@ -10,7 +10,7 @@ STATIC_LIBRARIES = $(SDSL_ROOT)/external/libdivsufsort/lib/libdivsufsort.a $(SDS
 
 
 founderblockgraph_objects = founderblockgraph_cmdline.o founderblockgraph.o founder_block_index.o
-locate_patterns_objects = locate_patterns.o founder_block_index.o
+locate_patterns_objects = locate_patterns_cmdline.o locate_patterns.o founder_block_index.o
 
 
 all: founderblockgraph locate_patterns
