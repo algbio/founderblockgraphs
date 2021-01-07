@@ -9,7 +9,7 @@ CPPFLAGS	+= -I$(SDSL_ROOT)/include -I$(SDSL_ROOT)/external/libdivsufsort/include
 STATIC_LIBRARIES = $(SDSL_ROOT)/external/libdivsufsort/lib/libdivsufsort.a $(SDSL_ROOT)/external/libdivsufsort/lib/libdivsufsort64.a $(SDSL_ROOT)/lib/libsdsl.a
 
 
-founderblockgraph_objects = cmdline.o founderblockgraph.o founder_block_index.o
+founderblockgraph_objects = founderblockgraph_cmdline.o founderblockgraph.o founder_block_index.o
 locate_patterns_objects = locate_patterns.o founder_block_index.o
 
 
@@ -33,4 +33,4 @@ founderblockgraph.cc: cmdline.c
 	$(CC) -c $(CPPFLAGS) $(CFLAGS) -o $@ $<
 
 #%.c: %.ggo
-#	$(GENGETOPT) --input="$<"
+#	$(GENGETOPT) --input="$<" -F $*

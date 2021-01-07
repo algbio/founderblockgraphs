@@ -11,7 +11,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include "cmdline.h"
+#include "founderblockgraph_cmdline.h"
 #include "founder_block_index.hpp"
 
 /*
