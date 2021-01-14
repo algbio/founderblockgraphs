@@ -29,6 +29,7 @@ namespace founder_block_graph {
         written_bytes += b_positions.serialize(os, child, "b_positions");
         written_bytes += e_positions.serialize(os, child, "e_positions");
         written_bytes += b_rank1_support.serialize(os, child, "b_rank1_support");
+        written_bytes += e_rank1_support.serialize(os, child, "e_rank1_support");
         written_bytes += b_select1_support.serialize(os, child, "b_select1_support");
         written_bytes += e_select1_support.serialize(os, child, "e_select1_support");
         sdsl::structure_tree::add_size(child, written_bytes);
@@ -42,6 +43,7 @@ namespace founder_block_graph {
         b_positions.load(in);
         e_positions.load(in);
         b_rank1_support.load(in, &b_positions);
+        e_rank1_support.load(in, &e_positions);
         b_select1_support.load(in, &b_positions);
         e_select1_support.load(in, &e_positions);
     }

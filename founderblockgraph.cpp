@@ -487,13 +487,27 @@ void make_index(
                 rhs
             )
         );
+
+		assert(lhs < b_positions.size());
+		assert(rhs < e_positions.size());
         
         // Check by searching the separator character.
-        if (match_count != (edges[i].size() + dst_occurrences[i]))
+		// FIXME: none of these are useful with the elastic version, hence the use of false in the beginning.
+        if (false && (b_positions[lhs] || e_positions[rhs] || match_count != (edges[i].size() + dst_occurrences[i])))
         {
-            std::cerr << "Got unexpected match count " << match_count << " for node " << i << " with label “" << label << "”\n";
-            std::cerr << "Actual in-edges: " << dst_occurrences[i] << " out-edges: " << edges[i].size() << "\n";
+			if (b_positions[lhs])
+				std::cerr << "b_positions[lhs] was already set.\n";
+			if (e_positions[rhs])
+				std::cerr << "e_positions[rhs] was already set.\n";
+			if (match_count != (edges[i].size() + dst_occurrences[i]))
+				std::cerr << "Got unexpected match count.\n";
+            std::cerr << "Match count:         " << match_count << '\n';
+			std::cerr << "Node:                " << i << '\n';
+			std::cerr << "Label:               “" << label << "”\n";
+            std::cerr << "Actual in-edges:     " << dst_occurrences[i] << '\n';
+			std::cerr << "Out-edges:           " << edges[i].size() << "\n";
             std::cerr << "Lexicographic range: " << lhs << ", " << rhs << '\n';
+
             std::vector <char> buffer;
             std::cerr << "Suffixes:\n";
             for (size_type i(lhs); i <= rhs; ++i)
