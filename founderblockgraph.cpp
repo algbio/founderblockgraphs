@@ -88,7 +88,7 @@ std::string remove_gaps(std:: string const &S) {
     return result;
 }
 
-bool check_gaps(std::string const &sequence, std::size_t gap_limit)
+bool check_gaps(std::string const &identifier, std::string const &sequence, std::size_t gap_limit)
 {
     if (0 == gap_limit)
         return true;
@@ -97,7 +97,7 @@ bool check_gaps(std::string const &sequence, std::size_t gap_limit)
     std::size_t maxgaprun(0);
     for (auto const c : sequence)
     {
-        if ('-' == c || 'N' == c)
+        if ('-' == c)
             ++gaprun;
         else
         {
@@ -107,7 +107,13 @@ bool check_gaps(std::string const &sequence, std::size_t gap_limit)
     }
     
     maxgaprun = std::max(gaprun, maxgaprun);
-    return (maxgaprun < gap_limit);
+    if (maxgaprun < gap_limit)
+		return true;
+	else
+	{
+		std::cerr << "Sequence “" << identifier.substr(1) << "” contained a gap run with " << maxgaprun << " characters.\n";
+		return false;
+	}
 }
 
 
@@ -140,7 +146,7 @@ void read_input(char const *input_path, std::size_t gap_limit, std::vector<std::
             }
             
             if (check_sequence_length(identifier, entry, expected_length) &&
-                check_gaps(entry, gap_limit))
+                check_gaps(identifier, entry, gap_limit))
             {
                 MSA.push_back(entry);
             }
@@ -154,7 +160,7 @@ void read_input(char const *input_path, std::size_t gap_limit, std::vector<std::
     }
     fs.close();
     if (check_sequence_length(identifier, entry, expected_length) &&
-        check_gaps(entry, gap_limit))
+        check_gaps(identifier, entry, gap_limit))
     {
         MSA.push_back(entry);
     }
@@ -682,6 +688,11 @@ int main(int argc, char **argv) {
 
     std::vector<std::string> MSA;
     read_input(args_info.input_arg, gap_limit, MSA);
+	if (MSA.empty())
+	{
+		std::cerr << "Unable to read sequences from the input\n.";
+		return EXIT_FAILURE;
+	}
     std::cout << "Input MSA[1.." << MSA.size() << ",1.." << MSA[0].size() << "]" << std::endl;
     
     cst_type cst;
