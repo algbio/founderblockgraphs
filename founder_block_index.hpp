@@ -32,7 +32,7 @@ namespace founder_block_graph {
     
     typedef sdsl::csa_wt<>  csa_type;
     
-    inline constexpr char g_separator_character{'#'};
+    inline constexpr char const g_separator_character{'#'};
     
     struct founder_block_index
     {
@@ -92,8 +92,8 @@ namespace founder_block_graph {
 		while (it != end)
 		{
 			// Search for the current character.
-			std::size_t new_lhs(0);
-			std::size_t new_rhs(0);
+			size_type new_lhs(0);
+			size_type new_rhs(0);
 			current_count = backward_search(*it, lhs, rhs, new_lhs, new_rhs);
 
 			// If not found, try to detect a block pair boundary.
