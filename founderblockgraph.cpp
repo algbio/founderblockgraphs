@@ -34,11 +34,7 @@ namespace {
 	namespace chrono = std::chrono;
 	namespace fbg = founder_block_graph;
 
-	typedef sdsl::cst_sct3 <
-		sdsl::csa_wt <
-			sdsl::wt_int <> // has range_search_2d, wm_int is another option.
-		>
-	>										cst_type;
+	typedef sdsl::cst_sct3 <>				cst_type;
 	typedef cst_type::size_type				size_type;
 
 	typedef std::unordered_set <size_type>	edge_set;
@@ -187,7 +183,6 @@ namespace {
 	bool load_cst(
 		char const *input_path_c,
 		std::vector <std::string> const &msa,
-		cst_type &cst,
 		cst_type &reverse_cst,
 		std::size_t gap_limit
 	)
@@ -198,41 +193,9 @@ namespace {
 		std::string const reverse_suffix(".reverse");
 		auto const gap_limit_s(std::to_string(gap_limit));
 		
-		auto const index_file(input_path + plain_suffix + gap_limit_s + index_suffix);
 		auto const reverse_index_file(input_path + reverse_suffix + plain_suffix + gap_limit_s + index_suffix);
 		
 		// Construct compressed suffix trees for C.
-		if (!sdsl::load_from_file(cst, index_file))
-		{
-			std::cout << "No index " << index_file << " located. Building index now.\n";
-			auto const concatenated_inputs_path(input_path + plain_suffix);
-			
-			// Output concatenated inputs to disk. Remove gap symbols and add separators for indexing.
-			{
-				std::fstream fs;
-				fs.open(concatenated_inputs_path, std::fstream::out);
-				for (auto const &seq : msa)
-				{
-					for (auto const c : seq)
-					{
-						if ('-' != c)
-							fs << c;
-					}
-					fs << '#';
-				}
-				fs.close();
-			}
-			
-			std::ifstream in(concatenated_inputs_path);
-			if (!in)
-			{
-				std::cout << "ERROR: File " << concatenated_inputs_path << " does not exist.\n";
-				return false;
-			}
-			sdsl::construct(cst, concatenated_inputs_path, 1); // generate index
-			sdsl::store_to_file(cst, index_file); // save it
-		}
-		
 		if (!sdsl::load_from_file(reverse_cst, reverse_index_file))
 		{
 			std::cout << "No index " << reverse_index_file << " located. Building index now.\n";
@@ -292,8 +255,8 @@ namespace {
 	};
 	
 	
-	// Support for contract_right() by one character and maintaining a co-lexicographic range.
-	class bidirectional_interval
+	// Support for contract_right() by one character.
+	class interval_pair
 	{
 	public:
 		typedef cst_type::node_type node_type;
@@ -301,17 +264,15 @@ namespace {
 	protected:
 		interval	m_parent;
 		interval	m_current;
-		node_type	m_co_node;
 		size_type	m_edge_characters_remaining{};
 		size_type	m_suffix_length{};
 		
 	public:
-		bidirectional_interval() = default;
+		interval_pair() = default;
 		
-		bidirectional_interval(cst_type const &cst, cst_type const &rev_cst):
+		interval_pair(cst_type const &rev_cst):
 			m_parent(INVALID_SIZE, 0),
-			m_current(0, cst.csa.size() - 1),
-			m_co_node(rev_cst.root())
+			m_current(0, rev_cst.csa.size() - 1)
 		{
 		}
 		
@@ -319,11 +280,9 @@ namespace {
 		size_type ep() const { return m_current.ep; }
 		size_type length() const { return m_current.length(); }
 		interval get_interval() const { return m_current; }
-		interval get_co_interval() const { return {m_co_node.i, m_co_node.j}; }
-		node_type get_co_node() const { return m_co_node; }
 		size_type get_suffix_length() const { return m_suffix_length; }
-		void extend_left(cst_type const &cst, cst_type const &rev_cst, char const cc);
-		void contract_right(cst_type const &cst, cst_type const &rev_cst);
+		void extend_left(cst_type const &cst, char const cc);
+		void contract_right(cst_type const &cst);
 	};
 	
 	
@@ -362,14 +321,17 @@ namespace {
 		auto const node(cst.lca(ll, rl));
 		
 		std::cerr << msg;
-		auto const str(sdsl::extract(cst, node));
-		for (size_type i(0); i < length; ++i)
-			std::cerr << char(str[i]);
+		if (length)
+		{
+			auto const str(sdsl::extract(cst, node));
+			for (size_type i(0); i < length; ++i)
+				std::cerr << char(str[i]);
+		}
 		std::cerr << '\n';
 	}
 
 
-	void bidirectional_interval::extend_left(cst_type const &cst, cst_type const &rev_cst, char const cc)
+	void interval_pair::extend_left(cst_type const &cst, char const cc)
 	{
 		//std::cerr << "------\n";
 
@@ -377,35 +339,17 @@ namespace {
 		m_parent.sp = INVALID_SIZE;
 		
 		// Update the lexicographic range.
-		auto const i(m_current.sp);
-		auto const j(m_current.ep);
-		sdsl::backward_search(cst.csa, i, j, cc, m_current.sp, m_current.ep);
+		auto &sp(m_current.sp);
+		auto &ep(m_current.ep);
+		sdsl::backward_search(cst.csa, sp, ep, cc, sp, ep);
 
 		++m_suffix_length;
 		
-		//extract("co-node before extend_left:   ", rev_cst, m_co_node);
 		//extract("node after extend_left:       ", cst, m_current, m_suffix_length);
-		
-		// Update the co-lexicographic range if needed.
-		if (rev_cst.depth(m_co_node) < m_suffix_length)
-		{
-			auto const lb(rev_cst.lb(m_co_node));
-			assert(cc);
-			auto const res(cst.csa.wavelet_tree.range_search_2d(i, j, 0, cc - 1, true));
-			auto const smaller_count(res.first);
-			auto const new_lb(lb + smaller_count);
-			auto const new_rb(new_lb + m_current.ep - m_current.sp);
-
-			auto const ll(rev_cst.select_leaf(new_lb + 1));
-			auto const rl(rev_cst.select_leaf(new_rb + 1));
-			m_co_node = rev_cst.lca(ll, rl);
-		}
-		
-		//extract("co-node after extend_left:    ", rev_cst, m_co_node);
 	}
 	
 	
-	void bidirectional_interval::contract_right(cst_type const &cst, cst_type const &rev_cst)
+	void interval_pair::contract_right(cst_type const &cst)
 	{
 		//std::cerr << "------\n";
 		
@@ -448,32 +392,11 @@ namespace {
 			m_parent.sp = INVALID_SIZE;
 		}
 		//extract("node after contract_right:    ", cst, m_current, m_suffix_length);
-		
-		// Update the co-lexicographic range.
-		m_co_node = rev_cst.sl(m_co_node);
-		
-		// See if part of the suffix (prefix) of the co-lexicographic range needs to be discarded.
-		// This could be improved by applying level ancestor queries as shown by Belazzougui and Cunial.
-		while (true)
-		{
-			auto const co_parent(rev_cst.parent(m_co_node));
-			auto const depth(rev_cst.depth(co_parent));
-			
-			if (depth < m_suffix_length)
-				break;
-			
-			m_co_node = co_parent;
-			
-			if (depth == m_suffix_length)
-				break;
-		}
-		
-		//extract("co-node after contract_right: ", rev_cst, m_co_node);
 	}
 	
 	
 	typedef std::vector <interval> interval_vector;
-	typedef std::vector <bidirectional_interval> bidirectional_interval_vector;
+	typedef std::vector <interval_pair> interval_pair_vector;
 	
 	
 	size_type sum_interval_lengths(interval_vector const &sorted_bwt_intervals)
@@ -499,9 +422,8 @@ namespace {
 	void extend_ranges_left(
 		std::vector <std::string> const &msa,
 		cst_type const &cst,
-		cst_type const &rev_cst,
 		size_type const input_pos,
-		bidirectional_interval_vector &bwt_intervals
+		interval_pair_vector &bwt_intervals
 	)
 	{
 		size_type const m(msa.size());
@@ -511,7 +433,7 @@ namespace {
 		{
 			auto const cc(msa[i][input_pos]);
 			if ('-' != cc)
-				bwt_intervals[i].extend_left(cst, rev_cst, cc);
+				bwt_intervals[i].extend_left(cst, cc);
 		}
 	}
 
@@ -519,9 +441,8 @@ namespace {
 	void contract_ranges_right(
 		std::vector <std::string> const &msa,
 		cst_type const &cst,
-		cst_type const &rev_cst,
 		size_type const input_pos,
-		bidirectional_interval_vector &bwt_intervals
+		interval_pair_vector &bwt_intervals
 	)
 	{
 		size_type const m(msa.size());
@@ -534,14 +455,14 @@ namespace {
 				continue;
 			
 			// The current character was not a gap; contract.
-			bwt_intervals[i].contract_right(cst, rev_cst);
+			bwt_intervals[i].contract_right(cst);
 		}
 	}
 	
 	
 	bool check_block(
 		size_type const m,
-		bidirectional_interval_vector const &bwt_intervals,
+		interval_pair_vector const &bwt_intervals,
 		interval_vector &sorted_bwt_intervals
 	)
 	{
@@ -549,8 +470,8 @@ namespace {
 		// (We could maintain just a permutation but this is easier.)
 		sorted_bwt_intervals.clear();
 		std::transform(bwt_intervals.begin(), bwt_intervals.end(), std::back_inserter(sorted_bwt_intervals),
-					   [](bidirectional_interval const &inv){
-			return inv.get_co_interval();
+					   [](interval_pair const &inv){
+			return inv.get_interval();
 		});
 		
 		std::sort(sorted_bwt_intervals.begin(), sorted_bwt_intervals.end());
@@ -563,7 +484,6 @@ namespace {
 
 	void find_valid_blocks(
 		std::vector <std::string> const &msa,
-		cst_type const &cst,
 		cst_type const &rev_cst,
 		std::vector <size_type> &v
 	)
@@ -575,27 +495,30 @@ namespace {
 		assert(v.size() <= n);
 		
 		// Initially all of the intervals correspond to all suffixes of the input.
-		bidirectional_interval_vector bwt_intervals(m, bidirectional_interval(cst, rev_cst));
-		bidirectional_interval_vector prev_bwt_intervals;
+		interval_pair_vector bwt_intervals(m, interval_pair(rev_cst));
+		interval_pair_vector prev_bwt_intervals;
 		interval_vector sorted_bwt_intervals;
 		
-		size_type column_range_rb(n); // Unlike with BWT intervals, use a half-open range.
-		size_type j(0);
+		size_type column_range_lb(0);
+		size_type column_range_rb(0); // Closed interval.
 		bool found_valid_range(false);
 		
-		// Try to find a suitable initial range.
-		while (j < n)
+		// Process the input from right to left.
+		// We extend the window right and contract it from the left, since
+		// the index is for the reverse of the text (while the names of the
+		// corresponding functions refer to the original text).
+		// First try to find a suitable initial range.
+		while (column_range_rb < n)
 		{
-			auto const column_range_lb(n - j - 1);
-			extend_ranges_left(msa, cst, rev_cst, column_range_lb, bwt_intervals);
+			extend_ranges_left(msa, rev_cst, column_range_rb, bwt_intervals);
 			if (check_block(m, bwt_intervals, sorted_bwt_intervals))
 			{
-				v[column_range_rb - 1] = column_range_lb;
+				v[column_range_rb] = column_range_lb;
 				found_valid_range = true;
 				break;
 			}
 			
-			++j;
+			++column_range_rb;
 		}
 		
 		if (!found_valid_range)
@@ -605,19 +528,19 @@ namespace {
 		// range that is segment repeat-free. Then left-extend by one and repeat.
 		while (true)
 		{
-			auto const column_range_lb(n - j - 1);
 			while (true)
 			{
-				// Try to right-contract the BWT intervals.
+				// Try to left-contract the BWT intervals.
 				prev_bwt_intervals = bwt_intervals;
-				assert(column_range_lb < column_range_rb);
-				contract_ranges_right(msa, cst, rev_cst, column_range_rb - 1, bwt_intervals);
+				assert(column_range_lb <= column_range_rb);
+				contract_ranges_right(msa, rev_cst, column_range_lb, bwt_intervals);
 				
 				if (check_block(m, bwt_intervals, sorted_bwt_intervals))
 				{
 					// The new interval was valid; store it.
-					--column_range_rb;
-					v[column_range_rb - 1] = column_range_lb;
+					// The previous value may be overwritten since the new range is shorter.
+					++column_range_lb;
+					v[column_range_rb] = column_range_lb;
 				}
 				else
 				{
@@ -627,20 +550,18 @@ namespace {
 				}
 			}
 			
-			++j;
-			if (n <= j)
+			++column_range_rb;
+			if (n <= column_range_rb)
 				break;
 			
-			// Left-extend.
-			auto const new_input_pos(n - j - 1);
-			extend_ranges_left(msa, cst, rev_cst, new_input_pos, bwt_intervals);
+			// Right-extend.
+			extend_ranges_left(msa, rev_cst, column_range_rb, bwt_intervals);
 		}
 	}
 	
 	
 	void segment(
 		std::vector <std::string> const &msa,
-		cst_type const &cst,
 		cst_type const &rev_cst,
 		std::vector <std::string> &out_labels,
 		adjacency_list &out_edges
@@ -652,7 +573,7 @@ namespace {
 		
 		// v[j] is such that MSA[1..m][v[j]..j] is a repeat-free segment.
 		std::vector <size_type> v(n, 0);
-		find_valid_blocks(msa, cst, rev_cst, v);
+		find_valid_blocks(msa, rev_cst, v);
 		
 	    /* Main algorithm begins */
 	    /* s[j] is the score of the optimal valid segmentation of MSA[1..m][1..j] */
@@ -750,7 +671,6 @@ namespace {
 	    {
 	        for (size_type i=0; i<m; i++)
 	        {
-
 	            ellv = remove_gaps(msa[i].substr(previndex,boundaries[k]-previndex+1));
 	            ellw = remove_gaps(msa[i].substr(boundaries[k]+1,boundaries[k+1]-boundaries[k]));  
 	            auto const &src_node_label(ellv);
@@ -1044,16 +964,15 @@ int main(int argc, char **argv) {
 	}
 	std::cout << "Input MSA[1.." << msa.size() << ",1.." << msa[0].size() << "]\n";
 	
-	cst_type cst;
 	cst_type reverse_cst;
-	if (!load_cst(args_info.input_arg, msa, cst, reverse_cst, gap_limit))
+	if (!load_cst(args_info.input_arg, msa, reverse_cst, gap_limit))
 		return EXIT_FAILURE;
 	
-	std::cout << "Index construction complete, index requires " << sdsl::size_in_mega_bytes(cst) << " MiB.\n";
+	std::cout << "Index construction complete, index requires " << sdsl::size_in_mega_bytes(reverse_cst) << " MiB.\n";
 	
 	std::vector <std::string> node_labels;
 	adjacency_list edges;
-	segment(msa, cst, reverse_cst, node_labels, edges);
+	segment(msa, reverse_cst, node_labels, edges);
 	
 	std::cout << "Writing the index to disk…\n";
 	make_index(node_labels, edges, args_info.output_arg, args_info.memory_chart_output_arg);
