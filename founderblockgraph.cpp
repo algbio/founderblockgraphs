@@ -224,9 +224,8 @@ void segment(
 
     size_type n = MSA[0].size();
 
-    /* v[j] is such that MSA[1..m][v[j]..j] is a repeat-free segment */
-    /* The following computes it naively. 
-       This is a preprocessing part of the main algorithm */
+    /* v[j] is such that MSA[0..m-1][v[j]..j] is a repeat-free segment */
+    /* This is a preprocessing part of the main algorithm */
 
     std::vector<size_type> v(n, 0);
 
@@ -289,7 +288,7 @@ void segment(
             if (jp==0) // cannot go more to the left
                 break;        
             jp--; 
-            /* Now looking at MSA[1..m][jp..j] */
+            /* Now looking at MSA[0..m-1][jp..j] */
             for (size_type i=0; i<m; i++) {
                 // Keeping old range on gap symbols
                 assert(jp < MSA[i].size());
@@ -302,44 +301,315 @@ void segment(
     }  
 
     /* Main algorithm begins */
-    /* s[j] is the score of the optimal valid segmentation of MSA[1..m][1..j] */
-    /* s[n]=min_{S is valid segmentation} max_{[a..b] \in S} b-a+1 */ 
+    /* s[j] is the score of the optimal valid segmentation of MSA[0..m-1][0..j] */
+    /* s[n-1]=min_{S is valid segmentation} max_{[a..b] \in S} b-a+1 */ 
     std::vector<size_type> s(n, n);
 
-    /* prev[j] is the pointer to the end of previous segment in optimal segmentation */
+    /* prev[j] is the pointer to the beginning of the segment ending at j in optimal segmentation */
     std::vector<size_type> prev(n, n);
+    
     // Computation of s[j]'s and prev[j]'s
     for (size_type j=0; j<n; j++) {
+        s[j] = j+2; // no valid range
+        prev[j] = j+1; // no valid range
         if (v[j]>j) 
             continue; // no valid range
-        s[j] = j+1; // handles case jp=0
-        prev[j] = j+1; // handles case jp=0
-        for (size_type jp=v[j]; jp>0; jp--) {
-            if (s[j]>std::max(s[jp-1],j-jp+1)) {
-                s[j] = std::max(s[jp-1],j-jp+1);
-                prev[j] = jp-1;       
+        jp=v[j];  
+        while (1) {
+            if (jp!=0 && s[jp-1]==jp+1)  {// no proper segmentation ending at jp-1
+                jp--;
+                continue; 
+            }
+            if (s[j]>std::max(jp==0?0:s[jp-1],j-jp+1)) {
+                s[j] = std::max(jp==0?0:s[jp-1],j-jp+1);
+                prev[j] = jp;       
             }
             if (s[j]==j-jp+1) 
                 break;
+            if (jp==0)
+               break;
+            jp--;
         }
     }
+
     // outputing optimal score 
     std::cout << "Optimal score: " << s[n-1] << std::endl;
+
+    if (s[n-1]==n+1) // no proper segmentation exists
+        return;
 
     std::list<size_type> boundariestemp;
     size_type j = n-1;
     boundariestemp.push_front(j);
-    while (prev[j]<j) {
-        boundariestemp.push_front(prev[j]);
-        j = prev[j];         
+    while (prev[j]!=0) {
+        boundariestemp.push_front(prev[j]-1);
+        j = prev[j]-1;         
     }
     std::vector<size_type> boundaries;
     for (const auto& j : boundariestemp)
         boundaries.push_back(j);
     std::cout << "Number of segments: " << boundaries.size() << std::endl;
-    //std::cout << "List of segment boundaries: " << std::endl;
-    //for (const auto& boundary : boundaries)
-    //    std::cout << boundary << std::endl;
+
+    /* Convert segmentation into founder block graph */
+    std::unordered_map<std::string, size_type> str2id;
+    size_type nodecount = 0; 
+    size_type previndex = 0;
+    
+    typedef std::vector<size_type> block_vector;
+    typedef std::vector<block_vector> block_matrix;
+    block_matrix blocks(boundaries.size());
+    std::string ellv, ellw;
+    for (size_type j=0; j<boundaries.size(); j++) {
+        for (size_type i=0; i<m; i++) {
+            ellv = remove_gaps(MSA[i].substr(previndex,boundaries[j]-previndex+1));   
+            if (!str2id.count(ellv)) {  
+                blocks[j].push_back(nodecount);
+                str2id[ellv] = nodecount++;
+            }
+        }
+        previndex = boundaries[j]+1;
+    }
+
+    std::vector<std::string> labels(nodecount);
+    for (const auto& pair : str2id) {
+        labels[pair.second] = pair.first;
+    }
+    size_type totallength = 0; 
+    for (size_type i=0; i<nodecount; i++)
+        totallength += labels[i].size();
+
+    std::cout << "#nodes=" << nodecount << std::endl;
+    std::cout << "total length of node labels=" << totallength << std::endl; 
+
+    size_type nfounders=0;
+    for (size_type j=0; j<boundaries.size(); j++)
+        if (blocks[j].size()>nfounders)
+            nfounders = blocks[j].size();
+    std::cout << "#founders=" << nfounders << std::endl;
+/***
+    typedef std::unordered_map<size_type, size_type> edge_map;
+    typedef std::vector<edge_map> edge_map_vector;
+    edge_map_vector edges(nodecount);
+    previndex = 0;
+    for (size_type k=0; k<boundaries.size()-1; k++) {
+        for (size_type i=0; i<m; i++) {
+            ellv = remove_gaps(MSA[i].substr(previndex,boundaries[k]-previndex+1));
+            ellw = remove_gaps(MSA[i].substr(boundaries[k]+1,boundaries[k+1]-boundaries[k]));  
+            edges[str2id[ellv]][str2id[ellw]] = 1;
+        }  
+*/
+    
+    adjacency_list edges(nodecount);
+    previndex = 0;
+    for (size_type k=0; k<boundaries.size()-1; k++)
+    {
+        for (size_type i=0; i<m; i++)
+        {
+
+            ellv = remove_gaps(MSA[i].substr(previndex,boundaries[k]-previndex+1));
+            ellw = remove_gaps(MSA[i].substr(boundaries[k]+1,boundaries[k+1]-boundaries[k]));  
+            auto const &src_node_label(ellv);
+            auto const &dst_node_label(ellw);
+            auto const src_node_idx_it(str2id.find(src_node_label));
+            auto const dst_node_idx_it(str2id.find(dst_node_label));
+            assert(src_node_idx_it != str2id.end());
+            assert(dst_node_idx_it != str2id.end());
+            auto const src_node_idx(src_node_idx_it->second);
+            auto const dst_node_idx(dst_node_idx_it->second);
+            edges[src_node_idx].insert(dst_node_idx);
+        }
+
+        previndex = boundaries[k]+1;
+    }
+    size_type edgecount = 0;
+    for (size_type i=0; i<nodecount; i++)
+        edgecount += edges[i].size();
+    std::cout << "#edges=" << edgecount << std::endl;
+    
+    using std::swap;
+    swap(out_labels, labels);
+    swap(out_edges, edges);
+}
+
+void segment2elastic(
+    std::vector<std::string> const &MSA,
+    cst_type const &cst,
+    std::vector <std::string> &out_labels,
+    adjacency_list &out_edges
+) {
+
+    size_type n = MSA[0].size();
+
+    size_type m = MSA.size();
+
+    /* v[j] is such that MSA[0..m-1][v[j]..j] is a repeat-free segment */
+    /* This is a preprocessing part of the main algorithm */
+
+    std::vector<size_type> v(n, 0);
+
+    std::vector<size_type> sp(m, 0);
+    std::vector<size_type> ep(m, cst.csa.size()-1);
+    std::vector<std::vector<size_type>> spj(n,std::vector<size_type>(m));
+    std::vector<std::vector<size_type>> epj(n,std::vector<size_type>(m));
+    std::vector<size_type> lcp(m, 0);
+    std::vector<Interval> pairs;
+    /* [sp[i]..ep[i]] maintains BWT interval of MSA[i][jp..j] */
+    /* lcp[i] = j-jp+1 minus the number of gap symbols in that range*/
+    /* pairs contains (sp[i],ep[i]) and is used for sorting the intervals */
+    size_type jp = n; // maintains the left-boundary 
+    size_type sum;
+    for (size_type j=n-1; j+1>0; j--) {
+        v[j] = j+1; // no valid range found
+        if (j<n-1) {  
+            /* contracting MSA[i][j] from right for all i */
+            for (size_type i=0; i<m; i++) {
+                /* mapping BWT range to suffix tree node,
+                   taking parent, mapping back if parent is not too far*/
+                // Keeping old range on gap symbols
+                if (MSA[i][j+1]!='-') {    
+                    node_t ll = cst.select_leaf(sp[i]+1); 
+                    node_t rl = cst.select_leaf(ep[i]+1); 
+                    node_t w = cst.lca(ll,rl);
+                    node_t u = cst.parent(w);
+                    lcp[i]--;              
+                    if (cst.depth(u)==lcp[i]) {
+                       // contracting first symbol from edge (u,w)
+                       sp[i] = cst.lb(u);
+                       ep[i] = cst.rb(u);
+                    }
+                } 
+            }
+        }   
+        while (1) {
+            /* Now checking if the union of intervals is of size m */
+            /* If that is the case, we have found v(j), otherwise continue left-extensions */
+            /* Intervals are distinct or nested, proper overlaps are impossible */
+            /* We can thus sort primarily by smallest left-boundary and secondary by largest right-boundary*/     
+            /* Then intervals get nested, and we can just sum the sizes of the out-most intervals*/     
+            pairs.clear();
+            for (size_type i=0; i<m; i++)            
+               pairs.push_back(Interval(sp[i],ep[i]));
+            std::sort(pairs.begin(),pairs.end());
+            sum = 0;
+            size_type spprev = pairs[0].sp;
+            size_type epprev = pairs[0].ep;
+            for (size_type i=1; i<m; i++)
+               if (pairs[i].sp>epprev) {
+                   sum += epprev-spprev+1;
+                   spprev= pairs[i].sp; 
+                   epprev = pairs[i].ep;          
+               }   
+            sum += epprev-spprev+1;  
+            if (sum == m) { // no non-aligned matches
+                v[j]=jp;
+                for (size_type i=0; i<m; i++) {
+                   spj[j][i] = sp[i];
+                   epj[j][i] = ep[i];
+                }
+                break;
+            }    
+            if (jp==0) // cannot go more to the left
+                break;        
+            jp--; 
+            /* Now looking at MSA[0..m-1][jp..j] */
+            for (size_type i=0; i<m; i++) {
+                // Keeping old range on gap symbols
+                assert(jp < MSA[i].size());
+                if (MSA[i][jp]!='-') {
+                    sdsl::backward_search(cst.csa,sp[i],ep[i],MSA[i][jp],sp[i],ep[i]);
+                    lcp[i]++;
+                }
+            }
+        } 
+    }  
+
+    /* Main algorithm begins */
+    /* s[j] is the score of the optimal valid elastic segmentation of MSA[0..m-1][0..j] */
+    /* s[n-1]=min_{S is valid elastic segmentation} max_{[a..b] \in S} b-a+1 */ 
+    std::vector<size_type> s(n, n);
+    /* prev[j] is the pointer to the end of previous segment in optimal segmentation */
+    std::vector<size_type> prev(n, n);
+
+    s[0]=2; // Assuming MSA[0..m-1][0] is not a valid segment
+    for (size_type j=1; j<n; j++) {
+        s[j] = j+2; // no valid range found
+        prev[j] = j+1; // no valid range found
+        // starting from the first valid range
+        jp = v[j];
+        for (size_type i=0; i<m; i++) {
+            sp[i]=spj[j][i];
+            ep[i]=epj[j][i];
+        }
+        if (jp>j) // no valid range found
+           continue;
+        while (1) {
+            /* Now checking if the union of intervals is of size m */
+            /* If that is the case, we have found v(j), otherwise continue left-extensions */
+            /* Intervals are distinct or nested, proper overlaps are impossible */
+            /* We can thus sort primarily by smallest left-boundary and secondary by largest right-boundary*/     
+            /* Then intervals get nested, and we can just sum the sizes of the out-most intervals*/     
+            pairs.clear();
+            for (size_type i=0; i<m; i++)            
+               pairs.push_back(Interval(sp[i],ep[i]));
+            std::sort(pairs.begin(),pairs.end());
+            sum = 0;
+            size_type spprev = pairs[0].sp;
+            size_type epprev = pairs[0].ep;
+            for (size_type i=1; i<m; i++)
+               if (pairs[i].sp>epprev) {
+                   sum += epprev-spprev+1;
+                   spprev= pairs[i].sp; 
+                   epprev = pairs[i].ep;          
+               }   
+            sum += epprev-spprev+1;  
+            if (sum == m) { // valid interval
+               //std::cout << "valid interval found: " << "[" << jp << "," << j << "]" << std::endl;
+               if (jp!=0 && s[jp-1]==jp+1) { // no proper segmentation ending at jp-1
+                  jp--;
+                  continue;
+               }
+               if (s[j]>std::max(jp==0?0:s[jp-1],j-jp+1)) {
+                  s[j] = std::max(jp==0?0:s[jp-1],j-jp+1);
+                  prev[j] = jp;       
+               }
+               if (s[j]==j-jp+1) {
+                   break;
+               }
+            }    
+            if (jp==0) // cannot go more to the left
+                break;        
+            jp--; 
+            /* Now looking at MSA[0..m-1][jp..j] */
+            for (size_type i=0; i<m; i++) {
+                // Keeping old range on gap symbols
+                assert(jp < MSA[i].size());
+                if (MSA[i][jp]!='-') {
+                    sdsl::backward_search(cst.csa,sp[i],ep[i],MSA[i][jp],sp[i],ep[i]);
+                    lcp[i]++;
+                }
+            }
+
+        } 
+        //std::cout << "jp=" << jp << std::endl;
+    }  
+
+    // outputing optimal score 
+    std::cout << "Optimal score: " << s[n-1] << std::endl;
+
+    if (s[n-1]==n+1) // no proper segmentation exists
+        return;
+
+    std::list<size_type> boundariestemp;
+    size_type j = n-1;
+    boundariestemp.push_front(j);
+    while (prev[j]!=0) {
+        boundariestemp.push_front(prev[j]-1);
+        j = prev[j]-1;         
+    }
+    std::vector<size_type> boundaries;
+    for (const auto& j : boundariestemp)
+        boundaries.push_back(j);
+    std::cout << "Number of segments: " << boundaries.size() << std::endl;
 
     /* Convert segmentation into founder block graph */
     std::unordered_map<std::string, size_type> str2id;
@@ -602,7 +872,10 @@ int main(int argc, char **argv) {
 
     std::vector <std::string> node_labels;
     adjacency_list edges;
-    segment(MSA, cst, node_labels, edges);
+    if (gap_limit == 1) // no gaps
+       segment(MSA, cst, node_labels, edges);
+    else
+       segment2elastic(MSA, cst, node_labels, edges);
     
     std::cout << "Writing the index to disk…\n";
     make_index(node_labels, edges, args_info.output_arg, args_info.memory_chart_output_arg);
