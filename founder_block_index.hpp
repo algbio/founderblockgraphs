@@ -32,7 +32,7 @@ namespace founder_block_graph {
     
     typedef sdsl::csa_wt<>  csa_type;
     
-    inline constexpr char g_separator_character{'#'};
+    inline constexpr char const g_separator_character{'#'};
     
     struct founder_block_index
     {
@@ -42,6 +42,7 @@ namespace founder_block_graph {
         sdsl::bit_vector            b_positions;
         sdsl::bit_vector            e_positions;
         sdsl::rank_support_v5<>     b_rank1_support;
+        sdsl::rank_support_v5<>     e_rank1_support;
         sdsl::select_support_mcl<>  b_select1_support;
         sdsl::select_support_mcl<>  e_select1_support;
         
@@ -52,6 +53,7 @@ namespace founder_block_graph {
             b_positions(std::move(b_positions_)),
             e_positions(std::move(e_positions_)),
             b_rank1_support(&b_positions),
+            e_rank1_support(&e_positions),
             b_select1_support(&b_positions),
             e_select1_support(&e_positions)
         {
@@ -80,61 +82,47 @@ namespace founder_block_graph {
     {
         return backward_search(it, end, 0, csa.size() - 1);
     }
-    
-    
-    template <typename t_reverse_pattern_iterator>
-    auto founder_block_index::backward_search(t_reverse_pattern_iterator it, t_reverse_pattern_iterator const end, size_type lhs, size_type rhs) -> size_type
-    {
-        size_type retval(0);
-        size_type current_count(0);
-        
-        if (it != end)
-        {
-            // Search for the first character.
-            current_count = backward_search(*it, lhs, rhs, lhs, rhs);
-            if (0 == current_count)
-                return 0;
-            
-            ++it;
-            if (it == end)
-                return current_count;
-            else
-            {
-                do
-                {
-                    // Try to detect a block pair boundary.
-                    // To this end, branch with g_separator_character on each step.
-                    {
-                        size_type new_lhs(0);
-                        size_type new_rhs(0);
-                        current_count = backward_search(g_separator_character, lhs, rhs, new_lhs, new_rhs);
-                        if (current_count)
-                        {
-                            // Update the lexicographic range.
-                            // Rank support gives the number of set bits in [0, k).
-                            auto const r(b_rank1_support(1 + lhs));
-                            if (r)
-                            {
-                                new_lhs = b_select1_support(r);
-                                new_rhs = e_select1_support(r);
-                                if (new_lhs <= lhs && rhs <= new_rhs)
-                                    retval += backward_search(it, end, new_lhs, new_rhs);
-                            }
-                        }
-                    }
-                    
-                    // Continue the search in the current block.
-                    current_count = backward_search(*it, lhs, rhs, lhs, rhs);
-                    if (0 == current_count)
-                        break;
-                    ++it;
-                } while (it != end);
-                retval += current_count;
-            }
-        }
-        
-        return retval;
-    }
+
+
+	template <typename t_reverse_pattern_iterator>
+	auto founder_block_index::backward_search(t_reverse_pattern_iterator it, t_reverse_pattern_iterator const end, size_type lhs, size_type rhs) -> size_type
+	{
+		size_type current_count(0);
+
+		while (it != end)
+		{
+			// Search for the current character.
+			size_type new_lhs(0);
+			size_type new_rhs(0);
+			current_count = backward_search(*it, lhs, rhs, new_lhs, new_rhs);
+
+			// If not found, try to detect a block pair boundary.
+			if (0 == current_count)
+			{
+				if (!backward_search(g_separator_character, lhs, rhs, new_lhs, new_rhs))
+					return 0;
+
+				// Update the lexicographic range.
+				// Rank support gives the number of set bits in [0, k).
+				auto const r1(b_rank1_support(1 + lhs));
+				auto const r2(e_rank1_support(1 + rhs));
+				if (! (r1 && r2)) // Sanity check.
+					return 0;
+
+				new_lhs = b_select1_support(r1);
+				new_rhs = e_select1_support(r2);
+				if (! (new_lhs <= lhs && rhs <= new_rhs))
+					return 0;
+
+				// Find the current character in the new range.
+				current_count = backward_search(*it, new_lhs, new_rhs, lhs, rhs);
+			}
+
+			++it;
+		}
+
+		return current_count;
+	}
 }
 
 #endif
