@@ -433,7 +433,7 @@ void segment(
 
 void segment2elastic(
     std::vector<std::string> const &MSA,
-    cst_type const &cst,
+    cst_type const &cst, bool greedy,
     std::vector <std::string> &out_labels,
     adjacency_list &out_edges
 ) {
@@ -570,7 +570,9 @@ void segment2elastic(
                }
                if (s[j]>std::max(jp==0?0:s[jp-1],j-jp+1)) {
                   s[j] = std::max(jp==0?0:s[jp-1],j-jp+1);
-                  prev[j] = jp;       
+                  prev[j] = jp;
+                  if (greedy)
+                     break;       
                }
                if (s[j]==j-jp+1) {
                    break;
@@ -875,7 +877,8 @@ int main(int argc, char **argv) {
     if (gap_limit == 1) // no gaps
        segment(MSA, cst, node_labels, edges);
     else
-       segment2elastic(MSA, cst, node_labels, edges);
+       segment2elastic(MSA, cst, true, node_labels, edges); // greedy==true-> proper segmentation
+       //segment2elastic(MSA, cst, false, node_labels, edges); // greedy==false-> optimal segmentation
     
     std::cout << "Writing the index to disk…\n";
     make_index(node_labels, edges, args_info.output_arg, args_info.memory_chart_output_arg);
