@@ -11,7 +11,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include "cmdline.h"
+#include "founderblockgraph_cmdline.h"
 #include "founder_block_index.hpp"
 
 /*
@@ -537,7 +537,7 @@ void segment2elastic(
         // starting from the first valid range
         jp = v[j];
         for (size_type i=0; i<m; i++) {
-            sp[i]=spj[j][i];
+            sp[i]=spj[j][i];  
             ep[i]=epj[j][i];
         }
         if (jp>j) // no valid range found
