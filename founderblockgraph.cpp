@@ -77,7 +77,8 @@ namespace {
 	};
 	
 	
-	std::string remove_gaps(std:: string const &S) {
+	template <typename t_string>
+	std::string remove_gaps(t_string const &S) {
 	    std::string result = "";
 	    for (size_type i=0; i<S.size(); i++) 
 	        if (S[i]!='-')
@@ -394,9 +395,28 @@ namespace {
 		//extract("node after contract_right:    ", cst, m_current, m_suffix_length);
 	}
 	
-	
 	typedef std::vector <interval> interval_vector;
 	typedef std::vector <interval_pair> interval_pair_vector;
+	
+	
+	struct column_range
+	{
+		size_type lb{};
+		size_type rb{};
+		
+		column_range() = default;
+		
+		column_range(size_type lb_, size_type rb_):
+			lb(lb_),
+			rb(rb_)
+		{
+		}
+		
+		size_type length() const { return rb - lb + 1; }
+		size_type extended_length(size_type lb_) const { return rb - lb_ + 1; }
+	};
+	
+	typedef std::vector <column_range> column_range_vector;
 	
 	
 	size_type sum_interval_lengths(interval_vector const &sorted_bwt_intervals)
@@ -485,14 +505,12 @@ namespace {
 	void find_valid_blocks(
 		std::vector <std::string> const &msa,
 		cst_type const &rev_cst,
-		std::vector <size_type> &v
+		column_range_vector &column_ranges
 	)
 	{
 		size_type const m(msa.size());
 		assert(0 < m);
-		
 		size_type const n(msa[0].size());
-		assert(v.size() <= n);
 		
 		// Initially all of the intervals correspond to all suffixes of the input.
 		interval_pair_vector bwt_intervals(m, interval_pair(rev_cst));
@@ -513,7 +531,7 @@ namespace {
 			extend_ranges_left(msa, rev_cst, column_range_rb, bwt_intervals);
 			if (check_block(m, bwt_intervals, sorted_bwt_intervals))
 			{
-				v[column_range_rb] = column_range_lb;
+				column_ranges.emplace_back(column_range_lb, column_range_rb);
 				found_valid_range = true;
 				break;
 			}
@@ -540,7 +558,11 @@ namespace {
 					// The new interval was valid; store it.
 					// The previous value may be overwritten since the new range is shorter.
 					++column_range_lb;
-					v[column_range_rb] = column_range_lb;
+					auto &last(column_ranges.back());
+					if (last.rb == column_range_rb)
+						last.lb = column_range_lb;
+					else
+						column_ranges.emplace_back(column_range_lb, column_range_rb);
 				}
 				else
 				{
@@ -571,129 +593,215 @@ namespace {
 		size_type const n(msa[0].size());
 		size_type const m(msa.size());
 		
-		// v[j] is such that MSA[1..m][v[j]..j] is a repeat-free segment.
-		std::vector <size_type> v(n, 0);
-		find_valid_blocks(msa, rev_cst, v);
+		// Repeat-free segments.
+		std::vector <column_range> column_ranges;
+		find_valid_blocks(msa, rev_cst, column_ranges);
 		
-	    /* Main algorithm begins */
-	    /* s[j] is the score of the optimal valid segmentation of MSA[1..m][1..j] */
-	    /* s[n]=min_{S is valid segmentation} max_{[a..b] \in S} b-a+1 */ 
-	    std::vector<size_type> s(n, n);
+		auto const &rightmost_range(column_ranges.back());
+		if (rightmost_range.rb != n - 1)
+		{
+			std::cerr << "Only the trivial segmentation is valid.\n";
+			return;
+		}
 
-	    /* prev[j] is the pointer to the end of previous segment in optimal segmentation */
-	    std::vector<size_type> prev(n, n);
-	    // Computation of s[j]'s and prev[j]'s
-	    for (size_type j=0; j<n; j++) {
-	        if (v[j]>j) 
-	            continue; // no valid range
-	        s[j] = j+1; // handles case jp=0
-	        prev[j] = j+1; // handles case jp=0
-	        for (size_type jp=v[j]; jp>0; jp--) {
-	            if (s[j]>std::max(s[jp-1],j-jp+1)) {
-	                s[j] = std::max(s[jp-1],j-jp+1);
-	                prev[j] = jp-1;       
-	            }
-	            if (s[j]==j-jp+1) 
-	                break;
-	        }
-	    }
-	    // outputing optimal score 
-	    std::cout << "Optimal score: " << s[n-1] << std::endl;
-
-	    std::list<size_type> boundariestemp;
-	    size_type j = n-1;
-	    boundariestemp.push_front(j);
-	    while (prev[j]<j) {
-	        boundariestemp.push_front(prev[j]);
-	        j = prev[j];         
-	    }
-	    std::vector<size_type> boundaries;
-	    for (const auto& j : boundariestemp)
-	        boundaries.push_back(j);
-	    std::cout << "Number of segments: " << boundaries.size() << std::endl;
-	    //std::cout << "List of segment boundaries: " << std::endl;
-	    //for (const auto& boundary : boundaries)
-	    //    std::cout << boundary << std::endl;
-
-	    /* Convert segmentation into founder block graph */
-	    std::unordered_map<std::string, size_type> str2id;
-	    size_type nodecount = 0; 
-	    size_type previndex = 0;
-    
-	    typedef std::vector<size_type> block_vector;
-	    typedef std::vector<block_vector> block_matrix;
-	    block_matrix blocks(boundaries.size());
-	    std::string ellv, ellw;
-	    for (size_type j=0; j<boundaries.size(); j++) {
-	        for (size_type i=0; i<m; i++) {
-	            ellv = remove_gaps(msa[i].substr(previndex,boundaries[j]-previndex+1));   
-	            if (!str2id.count(ellv)) {       
-	                blocks[j].push_back(nodecount);
-	                str2id[ellv] = nodecount++;
-	            }
-	        }
-	        previndex = boundaries[j]+1;
-	    }
-
-	    std::vector<std::string> labels(nodecount);
-	    for (const auto& pair : str2id) {
-	        labels[pair.second] = pair.first;
-	    }
-	    size_type totallength = 0; 
-	    for (size_type i=0; i<nodecount; i++)
-	        totallength += labels[i].size();
-
-	    std::cout << "#nodes=" << nodecount << std::endl;
-	    std::cout << "total length of node labels=" << totallength << std::endl; 
-
-	    size_type nfounders=0;
-	    for (size_type j=0; j<boundaries.size(); j++)
-	        if (blocks[j].size()>nfounders)
-	            nfounders = blocks[j].size();
-	    std::cout << "#founders=" << nfounders << std::endl;
-		/***
-		    typedef std::unordered_map<size_type, size_type> edge_map;
-		    typedef std::vector<edge_map> edge_map_vector;
-		    edge_map_vector edges(nodecount);
-		    previndex = 0;
-		    for (size_type k=0; k<boundaries.size()-1; k++) {
-		        for (size_type i=0; i<m; i++) {
-		            ellv = remove_gaps(MSA[i].substr(previndex,boundaries[k]-previndex+1));
-		            ellw = remove_gaps(MSA[i].substr(boundaries[k]+1,boundaries[k+1]-boundaries[k]));  
-		            edges[str2id[ellv]][str2id[ellw]] = 1;
-		        }  
+		// Verify the monotonicity of the column ranges.
+		assert(std::is_sorted(column_ranges.begin(), column_ranges.end(), [](column_range const &lhs, column_range const &rhs){
+			return lhs.lb <= rhs.lb && lhs.rb < rhs.rb;
+		}));
+		
+		auto const range_count(column_ranges.size());
+		std::vector <size_type> s(n, INVALID_SIZE);
+		std::vector <size_type> next(range_count, INVALID_SIZE); // Next non-overlapping block indices
+		std::vector <size_type> trace(range_count, INVALID_SIZE); // Previous block indices in the optimal path
+				
+		// Initial scores.
+		for (auto const &range : column_ranges)
+		{
+			assert(range.rb < s.size());
+			s[range.rb] = range.extended_length(0);
+		}
+		
+		// Next ranges that do not overlap with the current one.
+		{
+			size_type i(0);
+			size_type j(0);
+			
+			while (i < range_count)
+			{
+				assert(i < column_ranges.size());
+				auto const &lhs(column_ranges[i]);
+				while (j < range_count)
+				{
+					assert(j < column_ranges.size());
+					auto const &rhs(column_ranges[j]);
+					if (lhs.rb < rhs.lb)
+					{
+						assert(i < next.size());
+						next[i] = j;
+						break;
+					}
+					++j;
+				}
+				++i;
 			}
-		*/
-    
-	    adjacency_list edges(nodecount);
-	    previndex = 0;
-	    for (size_type k=0; k<boundaries.size()-1; k++)
-	    {
-	        for (size_type i=0; i<m; i++)
-	        {
-	            ellv = remove_gaps(msa[i].substr(previndex,boundaries[k]-previndex+1));
-	            ellw = remove_gaps(msa[i].substr(boundaries[k]+1,boundaries[k+1]-boundaries[k]));  
-	            auto const &src_node_label(ellv);
-	            auto const &dst_node_label(ellw);
-	            auto const src_node_idx_it(str2id.find(src_node_label));
-	            auto const dst_node_idx_it(str2id.find(dst_node_label));
-	            assert(src_node_idx_it != str2id.end());
-	            assert(dst_node_idx_it != str2id.end());
-	            auto const src_node_idx(src_node_idx_it->second);
-	            auto const dst_node_idx(dst_node_idx_it->second);
-	            edges[src_node_idx].insert(dst_node_idx);
-	        }
-
-	        previndex = boundaries[k]+1;
-	    }
-	    size_type edgecount = 0;
-	    for (size_type i=0; i<nodecount; i++)
-	        edgecount += edges[i].size();
-	    std::cout << "#edges=" << edgecount << std::endl;
-    
-	    using std::swap;
-	    swap(out_labels, labels);
-	    swap(out_edges, edges);
+		}
+		
+		// Determine the score limit.
+		size_type score_limit(0);
+		{
+			auto const &leftmost_range(column_ranges.front());
+			size_type max_score(leftmost_range.extended_length(0));
+			
+			for (size_type i(0); i < range_count; ++i)
+			{
+				assert(i < column_ranges.size());
+				assert(i < next.size());
+				auto const &lhs_range(column_ranges[i]);
+				max_score = std::max(max_score, lhs_range.length());
+				
+				auto const next_idx(next[i]);
+				if (INVALID_SIZE == next_idx)
+					continue;
+				
+				assert(next_idx < column_ranges.size());
+				auto const &rhs_range(column_ranges[next_idx]);
+				max_score = std::max(max_score, rhs_range.extended_length(lhs_range.rb + 1)); // Allow extensions.
+			}
+			score_limit = max_score + 1;
+		}
+		
+		// Main algorithm.
+		{
+			size_type i(0);
+			auto const range_count_1(range_count - 1);
+			while (i < range_count_1)
+			{
+				assert(i < column_ranges.size());
+				auto const &lhs(column_ranges[i]);
+				
+				// Compare to the ranges to the right starting from next[i].
+				assert(i < next.size());
+				for (auto j(next[i]); j < range_count; ++j)
+				{
+					assert(j < column_ranges.size());
+					auto const &rhs(column_ranges[j]);
+					assert(lhs.rb < rhs.lb);
+					auto const rhs_score(rhs.extended_length(lhs.rb + 1));
+					
+					// Stop if the score limit has been reached.
+					if (score_limit <= rhs_score)
+						break;
+					
+					assert(lhs.rb < s.size());
+					auto const score(std::max(s[lhs.rb], rhs_score));
+					if (score < s[rhs.rb])
+					{
+						assert(rhs.rb < s.size());
+						assert(j < trace.size());
+						s[rhs.rb] = score;
+						trace[j] = i;
+					}
+				}
+				
+				++i;
+			}
+		}
+		
+		// Extend the column ranges on the found path.
+		std::vector <column_range> chosen_ranges;
+		{
+			auto i(range_count - 1);
+			while (true)
+			{
+				assert(i < column_ranges.size());
+				assert(i < trace.size());
+				auto const prev_idx(trace[i]);
+				auto &range(column_ranges[i]);
+				if (INVALID_SIZE == prev_idx)
+				{
+					range.lb = 0;
+					chosen_ranges.push_back(range);
+					break;
+				}
+				
+				assert(prev_idx < column_ranges.size());
+				auto const &prev_range(column_ranges[prev_idx]);
+				range.lb = prev_range.rb + 1;
+				chosen_ranges.push_back(range);
+				i = prev_idx;
+			}
+			
+			std::reverse(chosen_ranges.begin(), chosen_ranges.end());
+		}
+		
+		// Create labels and edges for each column range.
+		{
+			std::set <std::string> lhs_labels;
+			std::set <std::string> rhs_labels;
+			
+			// Create string_views from the input.
+			std::vector <std::string_view> msa_views(m);
+			for (size_type i(0); i < m; ++i)
+				msa_views[i] = msa[i];
+			
+			// Create labels for the first range.
+			auto const &first_range(chosen_ranges.front());
+			for (size_type i(0); i < m; ++i)
+			{
+				auto const sv(msa_views[i].substr(first_range.lb, first_range.length()));
+				lhs_labels.emplace(remove_gaps(sv));
+			}
+			
+			// Copy to the output list.
+			std::copy(lhs_labels.begin(), lhs_labels.end(), std::back_inserter(out_labels));
+			
+			// Create labels and edges for the remaining ranges.
+			size_type lhs_idx_start(0);
+			size_type rhs_idx_start(lhs_labels.size());
+			auto const range_count(chosen_ranges.size());
+			for (size_type j(1); j < range_count; ++j)
+			{
+				// Create the labels.
+				assert(j < chosen_ranges.size());
+				auto const &rhs_range(chosen_ranges[j]);
+				for (size_type i(0); i < m; ++i)
+				{
+					assert(i < msa_views.size());
+					auto const sv(msa_views[i].substr(rhs_range.lb, rhs_range.length()));
+					rhs_labels.emplace(remove_gaps(sv));
+				}
+				
+				auto const lc(lhs_labels.size());
+				auto const rc(rhs_labels.size());
+				
+				// Copy to the output list.
+				assert(out_labels.size() == lhs_idx_start + lc);
+				assert(out_labels.size() == rhs_idx_start);
+				std::copy(rhs_labels.begin(), rhs_labels.end(), std::back_inserter(out_labels));
+				assert(out_labels.size() == rhs_idx_start + rc);
+				
+				// Create the edges.
+				assert(out_edges.size() == lhs_idx_start);
+				for (size_type ll(0); ll < lc; ++ll)
+				{
+					auto &adj_list(out_edges.emplace_back());
+					for (size_type rl(0); rl < rc; ++rl)
+						adj_list.insert(rhs_idx_start + rl);
+				}
+				assert(out_edges.size() == lhs_idx_start + lc);
+				
+				// Prepare for the next iteration.
+				lhs_idx_start = rhs_idx_start;
+				rhs_idx_start += rhs_labels.size();
+				
+				using std::swap;
+				swap(lhs_labels, rhs_labels);
+				rhs_labels.clear();
+			}
+			
+			// Make sure that there is an adjacency list for every node.
+			out_edges.resize(out_labels.size());
+		}
 	}
 	
 	
