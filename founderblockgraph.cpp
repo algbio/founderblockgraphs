@@ -39,7 +39,13 @@ namespace {
    typedef std::vector<edge_set> adjacency_list;
 
    inline constexpr size_type const INVALID_SIZE{std::numeric_limits <size_type>::max()};
+	inline constexpr bool const VERBOSE_LOGGING{true};
 
+#if defined(NDEBUG) && NDEBUG
+	inline constexpr bool const SHOULD_STORE_ASSIGNED_NODE_LABELS{false};
+#else
+	inline constexpr bool const SHOULD_STORE_ASSIGNED_NODE_LABELS{true};
+#endif
 
 	class temporary_file
 	{
@@ -1039,6 +1045,7 @@ namespace {
 	    // Also keep track of node occurrences.
 	    assert(edges.size() == node_labels.size());
 	    std::vector <std::size_t> dst_occurrences(node_labels.size(), 0);
+		std::string buffer;
 	    for (std::size_t i(0), count(node_labels.size()); i < count; ++i)
 	    {
 	        auto const &src_label(node_labels[i]);
@@ -1052,7 +1059,14 @@ namespace {
 	        for (auto const dst_node : sorted_dst_nodes)
 	        {
 	            auto const &dst_label(node_labels[dst_node]);
-	            temp_os << fbg::g_separator_character << src_label << dst_label;
+				
+				buffer.clear();
+				buffer += src_label;
+				buffer += dst_label;
+				buffer += fbg::g_separator_character;
+				std::reverse(buffer.begin(), buffer.end());
+				temp_os << buffer;
+				
 	            ++dst_occurrences[dst_node];
 	        }
 	    }
@@ -1068,9 +1082,14 @@ namespace {
 	    auto const csa_size(csa.size());
 	    sdsl::bit_vector b_positions(csa_size, 0);
 	    sdsl::bit_vector e_positions(csa_size, 0);
+		// These are only used when debugging.
+		std::map <size_type, std::string> labels_b;
+		std::map <size_type, std::string> labels_e;
 	    for (std::size_t i(0), count(node_labels.size()); i < count; ++i)
 	    {
 	        auto const &label(node_labels[i]);
+			if (VERBOSE_LOGGING)
+				std::cerr << "Handling node label " << label << '\n';
         
 	        fbg::csa_type::size_type lhs{}, rhs{};
 	        auto const match_count(
@@ -1078,8 +1097,8 @@ namespace {
 	                csa,
 	                0,
 	                csa_size - 1,
-	                label.begin(),
-	                label.end(),
+	                label.crbegin(),
+	                label.crend(),
 	                lhs,
 	                rhs
 	            )
@@ -1087,87 +1106,37 @@ namespace {
 
 			assert(lhs < b_positions.size());
 			assert(rhs < e_positions.size());
-        
-	        // Check by searching the separator character.
-			// FIXME: none of these are useful with the elastic version, hence the use of false in the beginning.
-	        if (false && (b_positions[lhs] || e_positions[rhs] || match_count != (edges[i].size() + dst_occurrences[i])))
-	        {
+			
+			// Sanity check.
+			{
+				bool should_stop(false);
+				
 				if (b_positions[lhs])
-					std::cerr << "b_positions[lhs] was already set.\n";
+				{
+					should_stop = true;
+					std::cerr << "b_positions[lhs] already set for " << lhs << ", edge = " << label << '\n';
+					if (SHOULD_STORE_ASSIGNED_NODE_LABELS)
+						std::cerr << "Previously assigned: " << labels_b[lhs] << '\n';
+				}
+				
 				if (e_positions[rhs])
-					std::cerr << "e_positions[rhs] was already set.\n";
-				if (match_count != (edges[i].size() + dst_occurrences[i]))
-					std::cerr << "Got unexpected match count.\n";
-	            std::cerr << "Match count:         " << match_count << '\n';
-				std::cerr << "Node:                " << i << '\n';
-				std::cerr << "Label:               “" << label << "”\n";
-	            std::cerr << "Actual in-edges:     " << dst_occurrences[i] << '\n';
-				std::cerr << "Out-edges:           " << edges[i].size() << "\n";
-	            std::cerr << "Lexicographic range: " << lhs << ", " << rhs << '\n';
-
-	            std::vector <char> buffer;
-	            std::cerr << "Suffixes:\n";
-	            for (size_type i(lhs); i <= rhs; ++i)
-	            {
-	                auto const text_pos(csa[i]);
-	                auto const end_pos(std::min(text_pos + 100, csa.size() - 1));
-                
-	                buffer.clear();
-	                buffer.resize(100, '\0');
-	                auto const count(sdsl::extract(csa, text_pos, end_pos, buffer.begin()));
-	                std::cerr << "i: " << i << "\ttext: ";
-	                for (size_type j(0); j < count; ++j)
-	                    std::cerr << buffer[j];
-	                std::cerr << '\n';
-	            }
-	            std::cerr << "Out-edges:\n";
-	            for (auto const dst_node : edges[i])
-	                std::cerr << dst_node << '\t' << node_labels[dst_node] << '\n';
-            
-	            {
-	                std::cerr << "Preceding characters:\n";
-	                auto const sigma(csa.wavelet_tree.sigma);
-	                std::vector<fbg::csa_type::wavelet_tree_type::value_type> cs(sigma, 0);
-	                size_type symbol_count(0);
-	                std::vector <size_type> r1(sigma, 0), r2(sigma, 0);
-	                sdsl::interval_symbols(csa.wavelet_tree, lhs, rhs, symbol_count, cs, r1, r2);
-	                for (std::size_t j(0); j < symbol_count; ++j)
-	                    std::cerr << "‘" << cs[j] << "’ (" << int(cs[j]) << ")\n";
-	            }
-            
-	            // Output a sample of the node labels, too.
-	            // We use binary search here instead of constructing a BWT index of the node labels only.
-	            {
-	                typedef std::pair<std::size_t, std::string> label_pair;
-	                typedef std::vector<label_pair> label_pair_vector;
-	                label_pair_vector sorted_node_labels(node_labels.size());
-	                for (std::size_t j(0), count(node_labels.size()); j < count; ++j)
-	                {
-	                    sorted_node_labels[j] = label_pair(j, node_labels[j]);
-	                    std::sort(sorted_node_labels.begin(), sorted_node_labels.end(), [](auto const &lhs, auto const &rhs){
-	                        return lhs.second < rhs.second;
-	                    });
-	                }
-                
-	                // Find the problematic label.
-	                auto const range(std::equal_range(sorted_node_labels.begin(), sorted_node_labels.end(), label_pair(0, label), [](auto const &lhs, auto const &rhs){
-	                    return lhs.second < rhs.second;
-	                }));
-	                typedef label_pair_vector::difference_type diff_type;
-	                auto it(range.first - std::min(diff_type(5), std::distance(sorted_node_labels.begin(), range.first)));
-	                auto const end(range.second + std::min(diff_type(5), std::distance(range.second, sorted_node_labels.end())));
-                                 
-	                std::cerr << "Sample of node labels:\n";
-	                while (it != end)
-	                {
-	                    std::cerr << it->first << '\t' << it->second << '\n';
-	                    ++it;
-	                }
-	            }
-            
-	            abort();
-	        }
-        
+				{
+					should_stop = true;
+					std::cerr << "e_positions[rhs] already set for " << rhs << ", edge = " << label << '\n';
+					if (SHOULD_STORE_ASSIGNED_NODE_LABELS)
+						std::cerr << "Previously assigned: " << labels_e[rhs] << '\n';
+				}
+				
+				if (should_stop)
+					std::abort();
+			}
+			
+			if (SHOULD_STORE_ASSIGNED_NODE_LABELS)
+			{
+				labels_b[lhs] = label;
+				labels_e[rhs] = label;
+			}
+			
 	        b_positions[lhs] = 1;
 	        e_positions[rhs] = 1;
 	    }
