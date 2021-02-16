@@ -40,7 +40,8 @@ int main(int argc, char **argv)
         index_is.open(args_info.index_arg, std::fstream::in);
         index.load(index_is);
     }
-    
+    int nfound = 0;
+    int npatterns = 0;
     while (true)
     {
         std::string pattern;
@@ -48,10 +49,12 @@ int main(int argc, char **argv)
         std::cout << "Pattern? " << std::flush;
         std::cin >> pattern;
         
-        if (std::cin.eof())
+        if (std::cin.eof()) {
+            std::cout << nfound << " out of " << npatterns << " patterns found" << std::endl;
             return EXIT_SUCCESS;
-        
-		fbg::founder_block_index::size_type pos(0);
+        } 
+        npatterns++;
+	fbg::founder_block_index::size_type pos(0);
         auto const occurrences(index.backward_search(pattern.begin(), pattern.end(), pos));
         std::cout << occurrences << " occurrences found.\n";
 
@@ -61,5 +64,7 @@ int main(int argc, char **argv)
 			if (args_info.error_on_not_found_flag)
 				return EXIT_FAILURE;
 		}
+                else
+                  nfound++;
     }
 }

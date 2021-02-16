@@ -145,6 +145,10 @@ namespace {
 		// Reading input fasta
 		std::fstream fs;
 		fs.open(input_path, std::fstream::in);
+
+		// Opening output stream for DEBUGing
+		std::fstream fs2;
+		fs2.open((std::string(input_path)+"."+std::to_string(gap_limit) + ".filtered").c_str(), std::fstream::out);
 		
 		// Assume that the first line contains a header.
 		std::getline(fs, identifier);
@@ -165,6 +169,7 @@ namespace {
 					check_gaps(identifier, entry, gap_limit))
 				{
 					msa.push_back(entry);
+                                        fs2 << remove_gaps(entry) << std::endl;
 				}
 				entry.clear();
 				identifier = line;
@@ -179,8 +184,10 @@ namespace {
 			check_gaps(identifier, entry, gap_limit))
 		{
 			msa.push_back(entry);
+                        fs2 << remove_gaps(entry) << std::endl;
 		}
-	}
+                fs2.close();      
+	} 
 	
 	
 	bool load_cst(char const *input_path, std::vector<std::string> const &MSA, cst_type &cst, size_t gap_limit) {
@@ -1231,7 +1238,7 @@ int main(int argc, char **argv) {
 		std::cerr << "Unable to read sequences from the input\n.";
 		return EXIT_FAILURE;
 	}
-    std::cout << "Input MSA[1.." << MSA.size() << ",1.." << MSA[0].size() << "]" << std::endl;
+    std::cout << "Input MSA[1.." << MSA.size() << ",1.." << MSA[0].size() << "]" << std::endl;   
     
     cst_type cst;
     if (!load_cst(args_info.input_arg, MSA, cst, gap_limit))
