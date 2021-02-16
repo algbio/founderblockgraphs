@@ -90,7 +90,7 @@ namespace founder_block_graph {
 		size_type current_count(0);
 		pos = 0;
 		
-		if (true)
+		if (false)
 		{
 			std::cerr << "Original text: " << sdsl::extract(csa, 0, csa.size() - 1) << '\n';
 			std::cerr << "Suffixes:\n";
