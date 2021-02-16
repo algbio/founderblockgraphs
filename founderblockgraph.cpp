@@ -665,7 +665,10 @@ namespace {
 	    std::cout << "Optimal score: " << s[n-1] << std::endl;
 
 	    if (s[n-1]==n+1) // no proper segmentation exists
-		return;
+		{
+			std::cout << "No proper segmentation exists.\n";
+			return;
+		}
 
 	    std::list<size_type> boundariestemp;
 	    size_type j = n-1;
@@ -1022,7 +1025,7 @@ namespace {
 	        auto const &dst_nodes(edges[i]);
 	        std::vector <size_type> sorted_dst_nodes(dst_nodes.begin(), dst_nodes.end());
 	        std::sort(sorted_dst_nodes.begin(), sorted_dst_nodes.end());
-        
+			
 	        for (auto const dst_node : sorted_dst_nodes)
 	        {
 	            auto const &dst_label(node_labels[dst_node]);
@@ -1032,6 +1035,10 @@ namespace {
 				buffer += dst_label;
 				buffer += fbg::g_separator_character;
 				std::reverse(buffer.begin(), buffer.end());
+				
+				if (VERBOSE_LOGGING)
+					std::cerr << "Outputting “" << buffer << "”\n";
+				
 				temp_os << buffer;
 				
 	            ++dst_occurrences[dst_node];
@@ -1056,10 +1063,11 @@ namespace {
 	    {
 	        auto const &label(node_labels[i]);
 			if (VERBOSE_LOGGING)
-				std::cerr << "Handling node label " << label << '\n';
-        
+				std::cerr << "Handling node label “" << label << "”\n";
+
+			// The search direction is forward as the index was generated from reversed labels.
 	        fbg::csa_type::size_type lhs{}, rhs{};
-	        //auto const match_count(
+	        auto const match_count(
 	            sdsl::backward_search(
 	                csa,
 	                0,
@@ -1068,9 +1076,10 @@ namespace {
 	                label.crend(),
 	                lhs,
 	                rhs
-	            );
-	        //);
+	            )
+			);
 
+			assert(match_count);
 			assert(lhs < b_positions.size());
 			assert(rhs < e_positions.size());
 			
