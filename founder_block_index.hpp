@@ -64,10 +64,10 @@ namespace founder_block_graph {
         inline size_type backward_search(char const c, size_type lhs, size_type rhs, size_type &out_lhs, size_type &out_rhs);
         
         template <typename t_reverse_pattern_iterator>
-        inline size_type backward_search(t_reverse_pattern_iterator it, t_reverse_pattern_iterator const end);
+        inline size_type backward_search(t_reverse_pattern_iterator it, t_reverse_pattern_iterator const end, size_type &pos);
         
         template <typename t_reverse_pattern_iterator>
-        size_type backward_search(t_reverse_pattern_iterator it, t_reverse_pattern_iterator const end, size_type lhs, size_type rhs);
+        size_type backward_search(t_reverse_pattern_iterator it, t_reverse_pattern_iterator const end, size_type lhs, size_type rhs, size_type &pos);
     };
     
     
@@ -78,47 +78,77 @@ namespace founder_block_graph {
     
     
     template <typename t_reverse_pattern_iterator>
-    auto founder_block_index::backward_search(t_reverse_pattern_iterator it, t_reverse_pattern_iterator const end) -> size_type
+    auto founder_block_index::backward_search(t_reverse_pattern_iterator it, t_reverse_pattern_iterator const end, size_type &pos) -> size_type
     {
-        return backward_search(it, end, 0, csa.size() - 1);
+        return backward_search(it, end, 0, csa.size() - 1, pos);
     }
 
 
 	template <typename t_reverse_pattern_iterator>
-	auto founder_block_index::backward_search(t_reverse_pattern_iterator it, t_reverse_pattern_iterator const end, size_type lhs, size_type rhs) -> size_type
+	auto founder_block_index::backward_search(t_reverse_pattern_iterator it, t_reverse_pattern_iterator const end, size_type lhs, size_type rhs, size_type &pos) -> size_type
 	{
 		size_type current_count(0);
+		pos = 0;
+		
+		if (true)
+		{
+			std::cerr << "Original text: " << sdsl::extract(csa, 0, csa.size() - 1) << '\n';
+			std::cerr << "Suffixes:\n";
+			for (std::size_t i(0); i < csa.size(); ++i)
+			{
+				if (csa[i])
+				{
+					auto const text(sdsl::extract(csa, csa[i] - 1, std::min(csa.size() - 1, csa[i] + 20)));
+					std::string_view text_sv(text);
+					std::cerr << i << ": " << text_sv[0] << ' ' << text.substr(1) << '\n';
+				}
+				else
+				{
+					auto const text(sdsl::extract(csa, csa[i], std::min(csa.size() - 1, csa[i] + 20)));
+					std::cerr << i << ":   " << text << '\n';
+				}
+			}
+		}
 
 		while (it != end)
 		{
 			// Search for the current character.
 			size_type new_lhs(0);
 			size_type new_rhs(0);
-			current_count = backward_search(*it, lhs, rhs, new_lhs, new_rhs);
+			auto const c(*it);
+			current_count = backward_search(c, lhs, rhs, new_lhs, new_rhs);
+			std::cerr << "Finding " << c << " from [" << lhs << ", " << rhs << "], got " << current_count << '\n';
 
-			// If not found, try to detect a block pair boundary.
-			if (0 == current_count)
+			if (current_count)
 			{
+				lhs = new_lhs;
+				rhs = new_rhs;
+			}
+			else
+			{
+				// If not found, try to detect a block pair boundary.
 				if (!backward_search(g_separator_character, lhs, rhs, new_lhs, new_rhs))
 					return 0;
-
+				
 				// Update the lexicographic range.
 				// Rank support gives the number of set bits in [0, k).
 				auto const r1(b_rank1_support(1 + lhs));
-				auto const r2(e_rank1_support(1 + rhs));
-				if (! (r1 && r2)) // Sanity check.
+				if (!r1)
 					return 0;
 
 				new_lhs = b_select1_support(r1);
-				new_rhs = e_select1_support(r2);
+				new_rhs = e_select1_support(r1);
 				if (! (new_lhs <= lhs && rhs <= new_rhs))
 					return 0;
 
 				// Find the current character in the new range.
 				current_count = backward_search(*it, new_lhs, new_rhs, lhs, rhs);
+				if (0 == current_count)
+					return 0;
 			}
 
 			++it;
+			++pos;
 		}
 
 		return current_count;
