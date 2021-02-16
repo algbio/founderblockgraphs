@@ -51,13 +51,15 @@ int main(int argc, char **argv)
         if (std::cin.eof())
             return EXIT_SUCCESS;
         
-        auto const occurrences(index.backward_search(pattern.rbegin(), pattern.rend()));
+		fbg::founder_block_index::size_type pos(0);
+        auto const occurrences(index.backward_search(pattern.begin(), pattern.end(), pos));
         std::cout << occurrences << " occurrences found.\n";
 
-		if (args_info.error_on_not_found_flag && 0 == occurrences)
+		if (0 == occurrences)
 		{
-			std::cerr << "ERROR: pattern not found.\n";
-			return EXIT_FAILURE;
+			std::cerr << "Pattern not found, pos = " << pos << ".\n";
+			if (args_info.error_on_not_found_flag)
+				return EXIT_FAILURE;
 		}
     }
 }
