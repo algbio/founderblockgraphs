@@ -758,9 +758,10 @@ namespace {
 	    swap(out_edges, edges);
 	}
 
-	void segment2elastic(
+
+	void segment2elasticValid(
 	    std::vector<std::string> const &MSA,
-	    cst_type const &cst, bool greedy,
+	    cst_type const &cst,
 	    std::vector <std::string> &out_labels,
 	    adjacency_list &out_edges
 	) {
@@ -776,8 +777,6 @@ namespace {
 
 	    std::vector<size_type> sp(m, 0);
 	    std::vector<size_type> ep(m, cst.csa.size()-1);
-	    std::vector<std::vector<size_type>> spj(n,std::vector<size_type>(m));
-	    std::vector<std::vector<size_type>> epj(n,std::vector<size_type>(m));
 	    std::vector<size_type> lcp(m, 0);
 	    std::vector<interval> pairs;
 	    /* [sp[i]..ep[i]] maintains BWT interval of MSA[i][jp..j] */
@@ -785,10 +784,6 @@ namespace {
 	    /* pairs contains (sp[i],ep[i]) and is used for sorting the intervals */
 	    size_type jp = n; // maintains the left-boundary 
 	    size_type sum;
-            /* TODO: replace the computation of v[j]'s, spj[j][i]'s, and epj[j][i]'s
-               with call to find_valid_blocks() */
-            /* TODO: improve O(mn) space required for spj[j][i]'s and epj[j][i]'s 
-               by e.g. streaming to disk */
 	    for (size_type j=n-1; j+1>0; j--) {
 		   v[j] = j+1; // no valid range found
 		   if (j<n-1) {  
@@ -833,10 +828,6 @@ namespace {
 		      sum += epprev-spprev+1;  
 		      if (sum == m) { // no non-aligned matches
 		         v[j]=jp;
-		         for (size_type i=0; i<m; i++) {
-		            spj[j][i] = sp[i];
-		            epj[j][i] = ep[i];
-		         }
 		         break;
 		      }    
 		      if (jp==0) // cannot go more to the left
@@ -853,68 +844,29 @@ namespace {
 		      }
    		   } 
 	    }  
-
 	    /* Main algorithm begins */
-	    /* s[j] is the score of the optimal valid elastic segmentation of MSA[0..m-1][0..j] */
-	    /* s[n-1]=min_{S is valid elastic segmentation} max_{[a..b] \in S} b-a+1 */ 
-	    std::vector<size_type> s(n, n);
+	    /* s[j] is the score of the valid elastic segmentation of MSA[0..m-1][0..j] */
+	    /* s[n-1]=min_{S is valid elastic segmentation} max_{[a..b] \in S} b-a+1 */
+            /* Heuristic applied so that s[n-1] is valid but not necessarily optimal */
+	    std::vector<size_type> s(n, n+1);
 	    /* prev[j] is the pointer to the end of previous segment in optimal segmentation */
-	    std::vector<size_type> prev(n, n);
-
-	    s[0]=2; // Assuming MSA[0..m-1][0] is not a valid segment
+	    std::vector<size_type> prev(n, n+1);
 	    for (size_type j=1; j<n; j++) {
-   		   s[j] = j+2; // no valid range found
-	   	   prev[j] = j+1; // no valid range found
-		   // starting from the first valid range
-		   jp = v[j];
-		   for (size_type i=0; i<m; i++) {
-		       sp[i]=spj[j][i];  
-		       ep[i]=epj[j][i];
-		   }
-		   if (jp>j) // no valid range found
-		      continue;
-		   while (1) {
-		      /* Now checking if the union of intervals is of size m */
-		      /* If that is the case, we have found v(j), otherwise continue left-extensions */
-		      /* Intervals are distinct or nested, proper overlaps are impossible */
-		      /* We can thus sort primarily by smallest left-boundary and secondary by largest right-boundary*/     
-		      /* Then intervals get nested, and we can just sum the sizes of the out-most intervals*/     
-   	   	      pairs.clear();
-		      for (size_type i=0; i<m; i++)            
-		          pairs.push_back(interval(sp[i],ep[i]));
-		      std::sort(pairs.begin(),pairs.end());
-	   	      sum = 0;
-		      size_type spprev = pairs[0].sp;
-		      size_type epprev = pairs[0].ep;
-		      for (size_type i=1; i<m; i++)
-		         if (pairs[i].sp>epprev) {
-		            sum += epprev-spprev+1;
-		            spprev= pairs[i].sp; 
-		            epprev = pairs[i].ep;          
-		         }   
-	  	      sum += epprev-spprev+1;  
-		      if (sum == m) { // valid interval
-		         if ((jp==0 || s[jp-1]<jp+1) && s[j]>std::max(jp==0?0:s[jp-1],j-jp+1)) { // valid segmentation possible
-		            s[j] = std::max(jp==0?0:s[jp-1],j-jp+1);
+                   jp = v[j]; // start of valid segment
+                   if (jp>j) 
+                      continue;
+                   else if (jp==0) {
+                      s[j] = j+1;
+                      prev[j] = 0;  
+                   }
+                   else if (std::max(s[jp-1],j-jp+1)<std::max(s[j-1],j-prev[j-1]+1)) {
+                            s[j] = std::max(s[jp-1],j-jp+1);
 		            prev[j] = jp;
-		            if (greedy)
-		               break;       
-		         }
-		         if (s[j]==j-jp+1) // going left does not improve the solution
-		            break;	         
-		      }    
-		      if (jp==0) // cannot go more to the left
-		         break;        
-		      jp--; 
-		      /* Now looking at MSA[0..m-1][jp..j] */
-		      for (size_type i=0; i<m; i++) {
-		         // Keeping old range on gap symbols
-		         assert(jp < MSA[i].size());
-		         if (MSA[i][jp]!='-') 
-		            sdsl::backward_search(cst.csa,sp[i],ep[i],MSA[i][jp],sp[i],ep[i]);
-		      }
-  		   } 
-		//std::cout << "jp=" << jp << std::endl;
+                         }
+                         else {
+                            s[j] = std::max(s[j-1],j-prev[j-1]+1);
+                            prev[j] = prev[j-1];  
+                         }
 	    }  
 	    // outputing optimal score 
 	    std::cout << "Optimal score: " << s[n-1] << std::endl;
@@ -1001,7 +953,6 @@ namespace {
 	    swap(out_labels, labels);
 	    swap(out_edges, edges);
 	}
-
 
 	void make_index(
 	    std::vector <std::string> node_labels,
@@ -1251,8 +1202,7 @@ int main(int argc, char **argv) {
     if (gap_limit == 1) // no gaps
        segment(MSA, cst, node_labels, edges);
     else
-       segment2elastic(MSA, cst, true, node_labels, edges); // greedy==true-> proper segmentation
-       //segment2elastic(MSA, cst, false, node_labels, edges); // greedy==false-> optimal segmentation
+       segment2elasticValid(MSA, cst, node_labels, edges);
     
     std::cout << "Writing the index to disk…\n";
     make_index(node_labels, edges, args_info.output_arg, args_info.memory_chart_output_arg);
