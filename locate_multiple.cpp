@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include <climits>
 #include <fstream>
 #include <iostream>
 #include "founder_block_index.hpp"
