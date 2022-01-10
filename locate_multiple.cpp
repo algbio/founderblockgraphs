@@ -44,7 +44,7 @@ int main(int argc, char **argv)
         index.load(index_is);
     }
     
-	std::string const pattern_file(argv[2]);
+    std::string const pattern_file(argv[2]);
     std::string const index_id(argv[3]);
     std::string const gap_limit(argv[4]);
     unsigned long const repetitions(strtoul(argv[5], nullptr, 10));
@@ -70,7 +70,7 @@ int main(int argc, char **argv)
         for (std::size_t i(0); i < repetitions; ++i)
         {
             auto const start(chrono::high_resolution_clock::now());
-			unsigned long long pos(0);
+            founder_block_index::size_type pos(0);
 			
             if (is_first)
             {
