@@ -70,7 +70,7 @@ int main(int argc, char **argv)
         for (std::size_t i(0); i < repetitions; ++i)
         {
             auto const start(chrono::high_resolution_clock::now());
-            founder_block_index::size_type pos(0);
+	    fbg::founder_block_index::size_type pos(0);
 			
             if (is_first)
             {
