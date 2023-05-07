@@ -1,11 +1,24 @@
 # founderblockgraphs
 Constructs segment repeat-free founder block graphs from multiple sequence alignments
 
-# installation
+# getting started
 
-Go to directory PATH where you want to install<br>
-git clone https://github.com/simongog/sdsl-lite<br>
-Go to sdsl-lite and follow instructions to install it<br>
-Go back to PATH<br>
-git clone https://github.com/algbio/founderblockgraphs<br>
-Go to founderblockgraphs and run make<br>
+Clone this repository with dependencies:
+```
+$ git clone --recurse-submodules https://github.com/algbio/founderblockgraphs.git
+$ cd founderblockgraphs
+```
+
+Build sdsl-lite:
+```
+$ cd sdsl-lite
+$ export GNUMAKEFLAGS=-j9
+$ ./install.sh
+$ export GNUMAKEFLAGS=
+$ cd ..
+```
+
+Build this project (`founderblockgraph`, `locate_multiple`, `locate_patterns`):
+```
+$ make
+```

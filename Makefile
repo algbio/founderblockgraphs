@@ -1,7 +1,5 @@
-include local.mk
-
+SDSL_ROOT	= ./sdsl-lite/build
 GENGETOPT	?= gengetopt
-
 OPT_FLAGS	?= -O2 -g
 CFLAGS		+= $(OPT_FLAGS) -std=c99 -Wall
 CXXFLAGS	+= $(OPT_FLAGS) -std=c++17 -Wall
