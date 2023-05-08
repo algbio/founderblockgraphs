@@ -16,13 +16,16 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 package		"founderblockgraphs"
-version		"0.1"
-purpose		"Constructs a segment repeat-free founder block graph"
-usage		"founderblockgraph --input=MSA.fasta --output=MSA.index [--gap-limit=GAPLIMIT] [--graphviz-output=…]"
-description	"Input is MSA given in fasta format. Rows with runs of gaps ‘-’ or N’s ≥ GAPLIMIT will be filtered out"
+version		"0.3"
+purpose		"Constructs a semi-repeat-free (Elastic) Founder Graph"
+usage		"founderblockgraph --input=MSA.fasta --output={MSA.index|efg.xgfa} [--elastic] [--gap-limit=GAPLIMIT] [--threads=THREADNUM] [--graphviz-output=…] [--output-paths]"
+description	"Input is MSA given in fasta format. In standard mode (without --elastic), rows with runs of gaps ‘-’ or N’s ≥ GAPLIMIT will be filtered out."
 
 option	"input"					-	"MSA input path"			string	typestr = "filename"					required
-option	"output"				-	"Index output path"			string	typestr	= "filename"					required
-option	"gap-limit"				-	"Gap limit"					long	typestr = "GAPLIMIT"	default = "1"	optional
+option	"output"				-	"Index/EFG output path"			string	typestr	= "filename"					required
+option	"gap-limit"				-	"Gap limit (suppressed by --elastic)"					long	typestr = "GAPLIMIT"	default = "1"	optional
+option	"elastic"	e	"Min-max-length semi-repeat-free segmentation"	flag	off
+option	"gfa"		-	"Saves output in xGFA format"	flag	off
+option	"output-paths"	p	"Print the original sequences as paths of the xGFA graph (requires --gfa)."	flag	off
 option	"graphviz-output"		-	"Graphviz output path"		string	typestr = "filename"					optional
 option	"memory-chart-output"	-	"Memory chart output path"	string	typestr = "filename"					optional

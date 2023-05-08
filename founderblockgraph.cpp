@@ -138,7 +138,7 @@ namespace {
 	}
 	
 	
-	void read_input(char const *input_path, std::size_t gap_limit, std::vector <std::string> &msa)
+	void read_input(char const *input_path, std::size_t gap_limit, bool elastic, std::vector <std::string> &msa, bool output_paths, std::vector<std::string> &identifiers)
 	{
 		std::string line, identifier, entry;
 
@@ -152,13 +152,15 @@ namespace {
 		
 		// Assume that the first line contains a header.
 		std::getline(fs, identifier);
-		
+		if (output_paths) identifiers.push_back(identifier.substr(1));
+
 		std::size_t expected_length(0);
 		bool is_first(true);
 		while (std::getline(fs, line))
 		{
 			if (line[0] == '>') // header
 			{
+				if (output_paths) identifiers.push_back(line.substr(1));
 				if (is_first)
 				{
 					expected_length = entry.size();
@@ -166,7 +168,7 @@ namespace {
 				}
 				
 				if (check_sequence_length(identifier, entry, expected_length) &&
-					check_gaps(identifier, entry, gap_limit))
+					(elastic || check_gaps(identifier, entry, gap_limit)))
 				{
 					msa.push_back(entry);
                                         fs2 << remove_gaps(entry) << std::endl;
@@ -180,8 +182,14 @@ namespace {
 			}
 		}
 		fs.close();
+
+		if (is_first)
+		{
+			expected_length = entry.size();
+			is_first = false;
+		}
 		if (check_sequence_length(identifier, entry, expected_length) &&
-			check_gaps(identifier, entry, gap_limit))
+			(elastic || check_gaps(identifier, entry, gap_limit)))
 		{
 			msa.push_back(entry);
                         fs2 << remove_gaps(entry) << std::endl;
@@ -199,7 +207,7 @@ namespace {
 	    // Constructing compressed suffix tree for C
 	    if (!sdsl::load_from_file(cst, index_file))
 	    {
-		std::cout << "No index "<<index_file<< " located. Building index now." << std::endl;
+		std::cerr << "No index "<<index_file<< " located. Building index now." << std::endl;
 		
 		// Output concatenated inputs to disk. Remove gap symbols and add separators for indexing.
 		{
@@ -219,7 +227,7 @@ namespace {
 		
 		std::ifstream in(std::string(input_path)+plain_suffix);
 		if (!in) {
-		    std::cout << "ERROR: File " << input_path << ".plain" << " does not exist. Exit." << std::endl;
+		    std::cerr << "ERROR: File " << input_path << ".plain" << " does not exist. Exit." << std::endl;
 		    return false;
 		}
 		sdsl::construct(cst, std::string(input_path)+plain_suffix, 1); // generate index
@@ -250,306 +258,7 @@ namespace {
 		else return 0;
 	}
 	
-/* 	
-	// Support for contract_right() by one character.
-	class interval_pair
-	{
-	public:
-		typedef cst_type::node_type node_type;
-		
-	protected:
-		interval	m_parent;
-		interval	m_current;
-		size_type	m_edge_characters_remaining{};
-		size_type	m_suffix_length{};
-		
-	public:
-		interval_pair() = default;
-		
-		interval_pair(cst_type const &rev_cst):
-			m_parent(INVALID_SIZE, 0),
-			m_current(0, rev_cst.csa.size() - 1)
-		{
-		}
-		
-		size_type sp() const { return m_current.sp; }
-		size_type ep() const { return m_current.ep; }
-		size_type length() const { return m_current.length(); }
-		interval get_interval() const { return m_current; }
-		size_type get_suffix_length() const { return m_suffix_length; }
-		void extend_left(cst_type const &cst, char const cc);
-		void contract_right(cst_type const &cst);
-	};
-	
-
-	
-	
-	auto interval::find_parent(cst_type const &cst) -> cst_type::node_type
-	{
-		auto const ll(cst.select_leaf(sp + 1));
-		auto const rl(cst.select_leaf(ep + 1));
-		auto const w(cst.lca(ll, rl));
-		auto const u(cst.parent(w));
-		return u;
-	}
-
-
-	void extract(char const *msg, cst_type const &cst, cst_type::node_type const &node)
-	{
-		std::cerr << msg;
-		auto const str(sdsl::extract(cst, node));
-		for (auto const c : str)
-			std::cerr << char(c);
-		std::cerr << '\n';
-	}
-
-
-	void extract(char const *msg, cst_type const &cst, interval const &interval, size_type const length)
-	{
-		auto const ll(cst.select_leaf(interval.sp + 1));
-		auto const rl(cst.select_leaf(interval.ep + 1));
-		auto const node(cst.lca(ll, rl));
-		
-		std::cerr << msg;
-		if (length)
-		{
-			auto const str(sdsl::extract(cst, node));
-			for (size_type i(0); i < length; ++i)
-				std::cerr << char(str[i]);
-		}
-		std::cerr << '\n';
-	}
-
-
-	void interval_pair::extend_left(cst_type const &cst, char const cc)
-	{
-		//std::cerr << "------\n";
-
-		// Mark the parent invalid.
-		m_parent.sp = INVALID_SIZE;
-		
-		// Update the lexicographic range.
-		auto &sp(m_current.sp);
-		auto &ep(m_current.ep);
-		sdsl::backward_search(cst.csa, sp, ep, cc, sp, ep);
-
-		++m_suffix_length;
-		
-		//extract("node after extend_left:       ", cst, m_current, m_suffix_length);
-	}
-	
-	
-	void interval_pair::contract_right(cst_type const &cst)
-	{
-		//std::cerr << "------\n";
-		
-		// While the represented suffix corresponds to a position
-		// in the middle of a CST edge, the lexicographic range remains
-		// the same.
-		
-		assert(m_suffix_length); // Can only right-contract non-root.
-		
-		if (INVALID_SIZE == m_parent.sp)
-		{
-			// Parent is currently not valid; find it.
-			auto parent_node(m_current.find_parent(cst));
-			size_type parent_depth(0);
-			while (true)
-			{
-				parent_depth = cst.depth(parent_node);
-				if (parent_depth < m_suffix_length)
-					break;
-				
-				// Make sure the loop is finite.
-				if (parent_node == cst.root())
-					throw std::logic_error("Reached the root node but still trying to find a suitable parent");
-				
-				assert(parent_node != cst.root());
-				parent_node = cst.parent(parent_node);
-			}
-			m_parent.sp = cst.lb(parent_node);
-			m_parent.ep = cst.rb(parent_node);
-			m_edge_characters_remaining = m_suffix_length - parent_depth;
-		}
-		
-		// Check whether the parent was reached.
-		assert(m_edge_characters_remaining);
-		--m_edge_characters_remaining;
-		--m_suffix_length;
-		if (0 == m_edge_characters_remaining)
-		{
-			m_current = m_parent;
-			m_parent.sp = INVALID_SIZE;
-		}
-		//extract("node after contract_right:    ", cst, m_current, m_suffix_length);
-	}
-	
-	
-	typedef std::vector <interval> interval_vector;
-	typedef std::vector <interval_pair> interval_pair_vector;
-	
-	
-	size_type sum_interval_lengths(interval_vector const &sorted_bwt_intervals)
-	{
-		size_type retval(0);
-		auto it(sorted_bwt_intervals.begin());
-		auto const end(sorted_bwt_intervals.end());
-		while (it != end)
-		{
-			retval += it->length();
-			auto const ep(it->ep);
-			
-			// Find the first interval not enclosed by *it.
-			it = std::partition_point(it, end, [ep](interval const &inv) {
-				return inv.ep <= ep;
-			});
-		}
-		
-		return retval;
-	}
-	
-	
-	void extend_ranges_left(
-		std::vector <std::string> const &msa,
-		cst_type const &cst,
-		size_type const input_pos,
-		interval_pair_vector &bwt_intervals
-	)
-	{
-		size_type const m(msa.size());
-		
-		// Find the next character on each input row.
-		for (size_type i(0); i < m; ++i)
-		{
-			auto const cc(msa[i][input_pos]);
-			if ('-' != cc)
-				bwt_intervals[i].extend_left(cst, cc);
-		}
-	}
-
-
-	void contract_ranges_right(
-		std::vector <std::string> const &msa,
-		cst_type const &cst,
-		size_type const input_pos,
-		interval_pair_vector &bwt_intervals
-	)
-	{
-		size_type const m(msa.size());
-
-		// For each interval, check whether it can be contracted.
-		for (size_type i(0); i < m; ++i)
-		{
-			auto const cc(msa[i][input_pos]);
-			if ('-' == cc)
-				continue;
-			
-			// The current character was not a gap; contract.
-			bwt_intervals[i].contract_right(cst);
-		}
-	}
-	
-	
-	bool check_block(
-		size_type const m,
-		interval_pair_vector const &bwt_intervals,
-		interval_vector &sorted_bwt_intervals
-	)
-	{
-		// Copy the intervals for sorting.
-		// (We could maintain just a permutation but this is easier.)
-		sorted_bwt_intervals.clear();
-		std::transform(bwt_intervals.begin(), bwt_intervals.end(), std::back_inserter(sorted_bwt_intervals),
-					   [](interval_pair const &inv){
-			return inv.get_interval();
-		});
-		
-		std::sort(sorted_bwt_intervals.begin(), sorted_bwt_intervals.end());
-		auto const length_sum(sum_interval_lengths(sorted_bwt_intervals));
-		
-		assert(m <= length_sum);
-		return (m == length_sum);
-	}
-
-
-	void find_valid_blocks(
-		std::vector <std::string> const &msa,
-		cst_type const &rev_cst,
-		std::vector <size_type> &v
-	)
-	{
-		size_type const m(msa.size());
-		assert(0 < m);
-		
-		size_type const n(msa[0].size());
-		assert(v.size() <= n);
-		
-		// Initially all of the intervals correspond to all suffixes of the input.
-		interval_pair_vector bwt_intervals(m, interval_pair(rev_cst));
-		interval_pair_vector prev_bwt_intervals;
-		interval_vector sorted_bwt_intervals;
-		
-		size_type column_range_lb(0);
-		size_type column_range_rb(0); // Closed interval.
-		bool found_valid_range(false);
-		
-		// Process the input from right to left.
-		// We extend the window right and contract it from the left, since
-		// the index is for the reverse of the text (while the names of the
-		// corresponding functions refer to the original text).
-		// First try to find a suitable initial range.
-		while (column_range_rb < n)
-		{
-			extend_ranges_left(msa, rev_cst, column_range_rb, bwt_intervals);
-			if (check_block(m, bwt_intervals, sorted_bwt_intervals))
-			{
-				v[column_range_rb] = column_range_lb;
-				found_valid_range = true;
-				break;
-			}
-			
-			++column_range_rb;
-		}
-		
-		if (!found_valid_range)
-			return;
-
-		// Continue by right-contracting the initial column range to find the shortest
-		// range that is segment repeat-free. Then left-extend by one and repeat.
-		while (true)
-		{
-			while (true)
-			{
-				// Try to left-contract the BWT intervals.
-				prev_bwt_intervals = bwt_intervals;
-				assert(column_range_lb <= column_range_rb);
-				contract_ranges_right(msa, rev_cst, column_range_lb, bwt_intervals);
-				
-				if (check_block(m, bwt_intervals, sorted_bwt_intervals))
-				{
-					// The new interval was valid; store it.
-					// The previous value may be overwritten since the new range is shorter.
-					++column_range_lb;
-					v[column_range_rb] = column_range_lb;
-				}
-				else
-				{
-					// Restore the previous state.
-					bwt_intervals = prev_bwt_intervals;
-					break;
-				}
-			}
-			
-			++column_range_rb;
-			if (n <= column_range_rb)
-				break;
-			
-			// Right-extend.
-			extend_ranges_left(msa, rev_cst, column_range_rb, bwt_intervals);
-		}
-	}
-*/
-	void segment(
+	int segment(
 	    std::vector<std::string> const &MSA,
 	    cst_type const &cst,
 	    std::vector <std::string> &out_labels,
@@ -669,12 +378,12 @@ namespace {
 	    }
 
 	    // outputing optimal score 
-	    std::cout << "Optimal score: " << s[n-1] << std::endl;
+	    std::cerr << "Optimal score: " << s[n-1] << std::endl;
 
 	    if (s[n-1]==n+1) // no proper segmentation exists
 		{
-			std::cout << "No proper segmentation exists.\n";
-			return;
+			std::cerr << "No proper segmentation exists.\n";
+			return EXIT_FAILURE;
 		}
 
 	    std::list<size_type> boundariestemp;
@@ -687,7 +396,7 @@ namespace {
 	    std::vector<size_type> boundaries;
 	    for (const auto& j : boundariestemp)
 		boundaries.push_back(j);
-	    std::cout << "Number of segments: " << boundaries.size() << std::endl;
+	    std::cerr << "Number of segments: " << boundaries.size() << std::endl;
 
 	    /* Convert segmentation into founder block graph */
 	    std::unordered_map<std::string, size_type> str2id;
@@ -717,14 +426,14 @@ namespace {
 	    for (size_type i=0; i<nodecount; i++)
 		totallength += labels[i].size();
 
-	    std::cout << "#nodes=" << nodecount << std::endl;
-	    std::cout << "total length of node labels=" << totallength << std::endl; 
+	    std::cerr << "#nodes=" << nodecount << std::endl;
+	    std::cerr << "total length of node labels=" << totallength << std::endl; 
 
 	    size_type nfounders=0;
 	    for (size_type j=0; j<boundaries.size(); j++)
 		if (blocks[j].size()>nfounders)
 		    nfounders = blocks[j].size();
-	    std::cout << "#founders=" << nfounders << std::endl;
+	    std::cerr << "#founders=" << nfounders << std::endl;
 	    
 	    adjacency_list edges(nodecount);
 	    previndex = 0;
@@ -751,15 +460,17 @@ namespace {
 	    size_type edgecount = 0;
 	    for (size_type i=0; i<nodecount; i++)
 		edgecount += edges[i].size();
-	    std::cout << "#edges=" << edgecount << std::endl;
+	    std::cerr << "#edges=" << edgecount << std::endl;
 	    
 	    using std::swap;
 	    swap(out_labels, labels);
 	    swap(out_edges, edges);
+
+	    return EXIT_SUCCESS;
 	}
 
 
-	void segment2elasticValid(
+	int segment2elasticValid(
 	    std::vector<std::string> const &MSA,
 	    cst_type const &cst,
 	    std::vector <std::string> &out_labels,
@@ -869,10 +580,13 @@ namespace {
                          }
 	    }  
 	    // outputing optimal score 
-	    std::cout << "Optimal score: " << s[n-1] << std::endl;
+	    std::cerr << "Optimal score: " << s[n-1] << std::endl;
 
 	    if (s[n-1]==n+1) // no proper segmentation exists
-		   return;
+	    {
+		   std::cerr << "No valid segmentation found!\n";
+		   return EXIT_FAILURE;
+	    }
 
 	    std::list<size_type> boundariestemp;
 	    size_type j = n-1;
@@ -884,7 +598,7 @@ namespace {
 	    std::vector<size_type> boundaries;
 	    for (const auto& j : boundariestemp)
 		   boundaries.push_back(j);
-	    std::cout << "Number of segments: " << boundaries.size() << std::endl;
+	    std::cerr << "Number of segments: " << boundaries.size() << std::endl;
 
 	    /* Convert segmentation into founder block graph */
 	    std::unordered_map<std::string, size_type> str2id;
@@ -914,14 +628,14 @@ namespace {
 	    for (size_type i=0; i<nodecount; i++)
 		   totallength += labels[i].size();
 
-	    std::cout << "#nodes=" << nodecount << std::endl;
-	    std::cout << "total length of node labels=" << totallength << std::endl; 
+	    std::cerr << "#nodes=" << nodecount << std::endl;
+	    std::cerr << "total length of node labels=" << totallength << std::endl; 
 
 	    size_type nfounders=0;
 	    for (size_type j=0; j<boundaries.size(); j++)
    		   if (blocks[j].size()>nfounders)
 		       nfounders = blocks[j].size();
-	    std::cout << "#founders=" << nfounders << std::endl;
+	    std::cerr << "#founders=" << nfounders << std::endl;
 	    
 	    adjacency_list edges(nodecount);
 	    previndex = 0;
@@ -947,11 +661,361 @@ namespace {
 	    size_type edgecount = 0;
 	    for (size_type i=0; i<nodecount; i++)
 		   edgecount += edges[i].size();
-	    std::cout << "#edges=" << edgecount << std::endl;
+	    std::cerr << "#edges=" << edgecount << std::endl;
 	    
 	    using std::swap;
 	    swap(out_labels, labels);
 	    swap(out_edges, edges);
+	    return EXIT_SUCCESS;
+	}
+
+	int segment_elastic_minmaxlength(
+	    std::vector<std::string> const &MSA,
+	    cst_type const &cst,
+	    std::vector <std::string> &out_labels,
+	    std::vector <size_type> &out_blocks,
+	    std::vector <size_type> &out_indices,
+	    adjacency_list &out_edges,
+	    bool output_paths,
+	    std::vector<std::vector<size_type>> &out_paths
+	) {
+	    size_type const n = MSA[0].size();
+	    size_type const m = MSA.size();
+	    size_type nongap = 0;
+	    for (size_type i = 0; i < m; i++) { // TODO: MSA struct
+		    for (size_type j = 0; j < n; j++) {
+			    if (MSA[i][j] != '-')
+				    nongap += 1;
+		    }
+	    }
+
+	    std::cerr << "MSA contains " << (n*m) - nongap  << " gaps.\n" << std::flush;
+
+	    // Preprocess the MSA rows for rank, select queries
+	    std::vector<sdsl::bit_vector> indexedrows(m, sdsl::bit_vector(n, 1));
+	    for (size_type i = 0; i < m; i++) {
+		    for (size_type j = 0; j < n; j++) {
+			    if (MSA[i][j] == '-')
+				    indexedrows[i][j] = 0;
+		    }
+	    }
+
+	    // rank support on the rows
+	    std::vector<sdsl::rank_support_v5<>> indexedrows_rs;
+	    indexedrows_rs.resize(m);
+	    for (size_type i = 0; i < m; i++) {
+		    sdsl::rank_support_v5<> rs(&indexedrows[i]);
+		    indexedrows_rs[i] = rs;
+	    }
+
+	    // select support on the rows
+	    std::vector<sdsl::select_support_mcl<>> indexedrows_ss;
+	    indexedrows_ss.resize(m);
+	    for (size_type i = 0; i < m; i++) {
+		    sdsl::select_support_mcl<> ss(&indexedrows[i]);
+		    indexedrows_ss[i] = ss;
+	    }
+
+	    // bitvector + rank and select support for finding corresponding row
+	    sdsl::bit_vector concatenated_rows(nongap + m, 0);
+	    size_type k = 0;
+	    for (size_type i = 0; i < m; i++) { // TODO: MSA struct
+		    for (size_type j = 0; j < n; j++) {
+			    if (MSA[i][j] != '-')
+				    k += 1;
+		    }
+		    concatenated_rows[k++] = 1;
+	    }
+	    sdsl::rank_support_v5<> concatenated_rows_rs(&concatenated_rows);
+
+	    /* This is a preprocessing part of the main algorithm */
+	    /* Find the nodes corresponding to reading each whole row */
+	    std::vector<node_t> leaves(m, cst.root());
+	    for (size_type next = 0, i = 0; i < m; i++) {
+		    leaves[i] = cst.select_leaf(cst.csa.isa[next] + 1);
+		    next += indexedrows_rs[i].rank(n) + 1;
+	    }
+
+	    /* binary coloring of the leaves */
+	    sdsl::bit_vector color(cst.size(cst.root()), false);
+
+	    /* f[x] is minimum index greater or equal to x such that MSA[0..m-1][x..f[x]] is a semi-repeat-free segment */
+	    std::vector<size_type> f(n, 0);
+	    for (size_type x = 0; x < n; x++) {
+		    /*std::cerr << "Computing f[x], with x = " << x << std::endl << std::flush;
+
+			std::cerr << "leaves for f[" << x << "] are: ";
+			for (auto l : leaves)
+				std::cerr << l << " ";
+			std::cerr << std::endl;*/
+
+		    size_type fimax = 0;
+		    // Mark each leaf in leaves
+		    for (auto l : leaves) {
+			    for (size_type ll = cst.lb(l); ll <= cst.rb(l); ll++) { // cst is not a generalized suffix tree
+				    color[ll] = true;
+			    }
+		    }
+
+		    // Process each set of contiguous leaves
+		    for (size_type i = 0; i < m; i++) {
+			    node_t const l = leaves[i];
+			    if (cst.lb(l) == 0 || color[cst.lb(l) - 1] == false) {
+				    // if leftmost leaf does not correspond to row i, skip
+				    if (concatenated_rows_rs.rank(cst.sn(cst.select_leaf(cst.lb(l) + 1))) != i)
+					    break;
+				    size_type lb = cst.lb(l);
+				    size_type rb = cst.rb(l);
+				    while (rb < cst.size(cst.root()) - 1 && color[cst.rb(cst.select_leaf(rb)) + 2]) {
+					    rb = rb + 1;
+				    }
+
+				    // Find the exclusive ancestors
+				    node_t w = l;
+				    while (cst.rb(w) <= rb) {
+					    node_t parent = cst.parent(w);
+					    if (lb <= cst.lb(parent) && cst.rb(parent) <= rb) {
+						    // parent is a correct replacement
+						    w = parent;
+					    } else {
+						    // parent fails so w is an exclusive ancestor
+						    for (size_type ll = cst.lb(w); ll <= cst.rb(w); ll++) {
+							    // get row
+							    size_type ii = concatenated_rows_rs.rank(cst.sn(cst.select_leaf(ll + 1)));
+							    size_type g = cst.depth(cst.parent(w)) + 1;
+							    size_type gg = indexedrows_rs[ii].rank(x) + g;
+							    size_type fi;
+							    if (gg >= indexedrows_rs[ii].rank(n)) {
+								    fi = n;
+							    } else {
+								    fi = indexedrows_ss[ii].select(indexedrows_rs[ii].rank(x) + g);
+							    }
+							    if (fi > fimax)
+								    fimax = fi;
+						    }
+						    if (cst.rb(w) == cst.size(cst.root()) - 1)
+							    break;
+						    w = cst.select_leaf(cst.rb(w) + 2);
+					    }
+				    }
+			    }
+		    }
+		    f[x] = fimax;
+
+		    for (size_type i = 0; i < m; i++) {
+			    for (size_type ll = cst.lb(leaves[i]); ll <= cst.rb(leaves[i]); ll++) { // cst is not a generalized suffix tree
+				    color[ll] = false;
+			    }
+			    if (MSA[i][x] != '-')
+				    leaves[i] = cst.sl(leaves[i]);
+		    }
+	    }
+
+	    // Make the segment (0,k) semi-repeat-free, where k is the first (0-indexed) position where [0,k] is not the empty-string for each row
+	    // TODO: test if this is useful and make it into an input parameter
+	    f[0] = 0;
+	    for (size_type i = 0; i < m; i++) {
+		    f[0] = std::max(f[0], indexedrows_ss[i].select(1));
+	    }
+	    // Make the semi-repeat-free segments (x,n+1) into (x,n)
+	    /*for (size_type j = 1; j < n; j++) {
+		    f[j] = std::min(f[j], n - 1);
+	    }*/
+	    /*std::cerr << "f: ";
+	    for (auto v : f)
+	    	std::cerr << v << " ";
+	    std::cerr << std::endl << std::flush;*/
+
+	    if (f[0] == n) {
+		    std::cerr << "No valid segmentation found!\n";
+		    return EXIT_FAILURE;
+	    }
+
+	    // Sort the resulting pairs (x,f(x)), make f(x) 1-indexed
+	    std::vector<std::pair<size_type,size_type>> minimal_right_extensions;
+	    minimal_right_extensions.resize(n);
+	    for (size_type x = 0; x < n; x++) {
+		    std::pair<size_type,size_type> p(x, f[x]+1);
+		    minimal_right_extensions[x] = p;
+	    }
+	    // TODO: choose sorting algorithm
+	    struct Local {
+		static bool pair_comparator(std::pair<size_type,size_type> a, std::pair<size_type,size_type> b) {
+		    return (std::get<1>(a) < std::get<1>(b));
+	    	}
+	    };
+	    std::sort(minimal_right_extensions.begin(), minimal_right_extensions.end(), Local::pair_comparator);
+
+
+	    // END OF PREPROCESSING
+
+	    std::cerr << "Computing optimal segmentation..." << std::flush;
+	    std::vector<size_type> count_solutions(n, 0);
+	    std::vector<size_type> backtrack_count(n, 0);
+	    std::vector<std::list<std::pair<size_type,size_type>>> transition_list(n + 2);
+	    // NOTE: transition_list[n + 1] can be used to manage the terminator character
+	    // UPDATE: this note probably is not true, this can be fixed in here
+	    std::vector<size_type> minmaxlength(n + 1, 0);
+	    std::vector<size_type> backtrack(n + 1, 0);
+	    size_type y = 0, I = 0, S = n + 1, backtrack_S = -1;
+	    for (size_type j = 1; j <= n; j++) {
+		    while (j == std::get<1>(minimal_right_extensions[y])) {
+			    size_type xy  = std::get<0>(minimal_right_extensions[y]);
+			    size_type rec_score = minmaxlength[xy];
+			    //std::cerr << "rec_score = " << rec_score << std::endl;
+			    if (rec_score > n) {
+				    // filter out cases when there is no recursive solution
+			    } else if (j <= xy + rec_score) {
+				    count_solutions[rec_score] += 1;
+				    I = std::min(I, rec_score);
+				    const size_type current_x = backtrack_count[rec_score];
+				    if (xy + rec_score > current_x + minmaxlength[current_x]) {
+					    backtrack_count[rec_score] = xy;
+				    }
+				    if (xy + rec_score + 1 <= n) {
+					    transition_list[xy + rec_score + 1].push_back(minimal_right_extensions[y]);
+				    }
+			    } else {
+				    if (j - xy < S) {
+					    backtrack_S = xy;
+				    }
+				    S = std::min(S, j - xy);
+			    }
+			    y += 1;
+		    }
+		    for (auto pair : transition_list[j]) {
+			    const size_type x = std::get<0>(pair);
+			    count_solutions[minmaxlength[x]] -= 1;
+			    if (j - x < S) {
+			    	S = j - x;
+				backtrack_S = x;
+			    }
+			    if (count_solutions[minmaxlength[x]] == 0) {
+				    backtrack_count[minmaxlength[x]] = 0;
+			    }
+		    }
+		    if (count_solutions[I] > 0 && I < S) { //TODO: what if I == S? should we pick the smallest backtrack?
+			    minmaxlength[j] = I;
+			    backtrack[j] = backtrack_count[I];
+		    } else {
+			    minmaxlength[j] = S;
+			    backtrack[j] = backtrack_S;
+		    }
+		    S += 1;
+		    if (count_solutions[I] == 0)
+			    I += 1;
+	    }
+	    /*std::cerr << "minmaxlength: ";
+	    for (auto v : minmaxlength)
+		    std::cerr << v << " ";
+	    std::cerr << std::endl;
+	    std::cerr << "backtrack: ";
+	    for (auto v : backtrack)
+		    std::cerr << v << " ";
+	    std::cerr << std::endl;*/
+	    std::cerr << "done (optimal segment length = " << minmaxlength[n] << ")." << std::endl << std::flush;
+
+	    // TODO: abstract this code, it's taken from function segment2elasticValid()
+	    // NB: added block info
+	    std::list<size_type> boundariestemp;
+	    size_type j = n;
+	    boundariestemp.push_front(j);
+	    while (backtrack[j]!=0) {
+		   //std::cerr << j << " ";
+		   boundariestemp.push_front(backtrack[j]-1);
+		   j = backtrack[j];
+	    }
+
+	    std::vector<size_type> boundaries;
+	    for (const auto& j : boundariestemp)
+		   boundaries.push_back(j);
+
+	    /* Convert segmentation into founder block graph */
+	    // TODO: check, O(log(n)) complexity of operations?
+	    std::unordered_map<std::string, std::pair<size_type,size_type>> str2id; // map label -> node_id, block?
+	    size_type nodecount = 0; 
+	    size_type previndex = 0;
+	    
+	    typedef std::vector<size_type> block_vector;
+	    typedef std::vector<block_vector> block_matrix;
+	    block_matrix blocks(boundaries.size());
+	    std::string ellv, ellw;
+	    std::vector<std::vector<size_type>> paths (m, std::vector<size_type>());
+	    for (size_type j=0; j<boundaries.size(); j++) {
+		   for (size_type i=0; i<m; i++) {
+		      ellv = remove_gaps(MSA[i].substr(previndex,boundaries[j]-previndex+1));
+		      if (!str2id.count(ellv)) {
+		         blocks[j].push_back(nodecount);
+			 std::pair p(nodecount++, j);
+		         str2id[ellv] = p;
+			 //std::cerr << "p.first = " << p.first << " and p.second = " << p.second << "\n";
+		      }
+		      if (output_paths) paths[i].push_back(str2id[ellv].first);
+		   }
+		   previndex = boundaries[j]+1;
+	    }
+	    /*std::cerr << "My paths are: " << std::endl;
+	    for (size_type i = 0; i < m; i++) {
+		    std::cerr << i << ": ";
+		    for (auto s : paths[i]) {
+			    std::cerr << s+1 << " ";
+		    }
+		    std::cerr << std::endl;
+	    }*/
+
+	    std::vector<std::string> labels(nodecount);
+	    std::vector<size_type> bblocks(nodecount);
+	    for (const auto& pair : str2id) {
+		   labels[pair.second.first] = pair.first;
+		   bblocks[pair.second.first] = pair.second.second;
+	    }
+	    size_type totallength = 0; 
+	    for (size_type i=0; i<nodecount; i++)
+		   totallength += labels[i].size();
+
+	    std::cerr << "#nodes=" << nodecount << std::endl;
+	    std::cerr << "total length of node labels=" << totallength << std::endl; 
+
+	    /*size_type nfounders=0;
+	    for (size_type j=0; j<boundaries.size(); j++)
+   		   if (blocks[j].size()>nfounders)
+		       nfounders = blocks[j].size();
+	    std::cerr << "#founders=" << nfounders << std::endl;*/
+	    
+	    adjacency_list edges(nodecount);
+	    previndex = 0;
+	    for (size_type k=0; k<boundaries.size()-1; k++)
+	    {
+		   for (size_type i=0; i<m; i++)
+	       {
+		      ellv = remove_gaps(MSA[i].substr(previndex,boundaries[k]-previndex+1));
+ 		      ellw = remove_gaps(MSA[i].substr(boundaries[k]+1,boundaries[k+1]-boundaries[k]));  
+		      auto const &src_node_label(ellv);
+		      auto const &dst_node_label(ellw);
+		      auto const src_node_idx_it(str2id.find(src_node_label));
+		      auto const dst_node_idx_it(str2id.find(dst_node_label));
+		      assert(src_node_idx_it != str2id.end());
+		      assert(dst_node_idx_it != str2id.end());
+		      auto const src_node_idx(src_node_idx_it->second);
+		      auto const dst_node_idx(dst_node_idx_it->second);
+		      edges[src_node_idx.first].insert(dst_node_idx.first);
+	       }
+
+		   previndex = boundaries[k]+1;
+	    }
+	    size_type edgecount = 0;
+	    for (size_type i=0; i<nodecount; i++)
+		   edgecount += edges[i].size();
+	    std::cerr << "#edges=" << edgecount << std::endl;
+	    
+	    using std::swap;
+	    swap(out_labels, labels);
+	    swap(out_blocks, bblocks);
+	    swap(out_indices, boundaries);
+	    swap(out_edges, edges);
+	    swap(out_paths, paths);
+	    std::cerr << std::flush;
+	    return 0;
 	}
 
 	void make_index(
@@ -1110,6 +1174,81 @@ namespace {
 	    }
 	}
 
+	void make_gfa(
+		std::vector<std::string> const &MSA,
+		std::vector<std::string> const &identifiers,
+		std::vector <std::string> &node_labels,
+		adjacency_list &edges,
+		std::vector <size_type> &node_blocks,
+		std::vector <size_type> &block_indices,
+		bool output_paths,
+		std::vector<std::vector<size_type>> &paths,
+		char const *dst_path_c,
+		char const *mem_chart_path_c)
+	{
+		// Create a temporary file.
+		std::string const dst_path(dst_path_c);
+		std::fstream dst_os;
+		dst_os.exceptions(std::fstream::failbit);
+		dst_os.open(dst_path, std::ios_base::out);
+
+		assert(edges.size() == node_labels.size());
+		// MSA info
+		dst_os << "M\t" << MSA.size() << "\t" << MSA[0].length() << std::endl;
+
+		// Segmentation info
+		dst_os << "X\t1";
+		for (size_type i = 0; (int)i < (int)block_indices.size() - 1; i++)
+			dst_os << "\t" << block_indices[i] + 2;
+		dst_os << std::endl;
+
+		// Partition of nodes into blocks
+		dst_os << "B\t";
+		size_t pastblock = -1, blockheight = 0;
+		for (size_t i = 0; i < node_labels.size(); i++)
+		{
+			if (node_blocks[i] != pastblock && pastblock != (size_t)-1) {
+				dst_os << blockheight << "\t";
+			blockheight = 1;
+			} else {
+				blockheight += 1;
+			}
+			pastblock = node_blocks[i];
+		}
+		dst_os << blockheight << std::endl;
+
+		// node labels
+		for (size_t i = 0; i < node_labels.size(); ++i)
+		{
+	        	auto const &src_label(node_labels[i]);
+			dst_os << "S\t" << i+1 << "\t" << src_label << std::endl;
+		}
+
+		// edges
+		for (size_t i = 0; i < node_labels.size(); i++)
+		{
+			// sort the destination nodes
+			auto const &dst_nodes(edges[i]);
+			std::vector<size_type> sorted_dst_nodes(dst_nodes.begin(), dst_nodes.end());
+			std::sort(sorted_dst_nodes.begin(), sorted_dst_nodes.end());
+			for (auto const dst_node : sorted_dst_nodes)
+				dst_os << "L\t" << i+1 << "\t+\t" << dst_node+1 << "\t+\t0M" << std::endl;
+		}
+
+		if (!output_paths) return;
+		// paths
+		for (size_type i = 0; i < paths.size(); i++)
+		{
+			assert(MSA.size() == paths.size());
+			assert(identifiers.size() == paths.size());
+			dst_os << "P\t" << identifiers[i] << "\t";
+			for (size_type j = 0; j < paths[i].size() - 1; j++) {
+				dst_os << paths[i][j]+1 << "+,";
+			}
+			dst_os << paths[i][paths[i].size()-1]+1 << "+";
+			dst_os << "\t*" << std::endl;
+		}
+	}
 
 	void output_graphviz(
 	    std::vector <std::string> node_labels,
@@ -1128,7 +1267,7 @@ namespace {
 	        std::size_t i(0);
 	        for (auto const &label : node_labels)
 	        {
-	            os << 'n' << i << " [label = \"";
+	            os << 'n' << i << " [label = \"" << i+1 << ": ";
 	            output_graphviz_label(os, label);
 	            os << "\"];\n";
 	            ++i;
@@ -1165,59 +1304,104 @@ namespace {
 
 
 
-int main(int argc, char **argv) { 
+int main(int argc, char **argv)
+{ 
+	// TODO: add verbose or log options
 
-    gengetopt_args_info args_info;
-    if (0 != cmdline_parser(argc, argv, &args_info))
-        return EXIT_FAILURE;
-    
-    std::ios_base::sync_with_stdio(false);    // Don't use C style IO after calling cmdline_parser.
-    
-    auto const gap_limit(args_info.gap_limit_arg);
-    if (gap_limit < 0)
-    {
-        std::cerr << "Gap limit needs to be non-negative.\n";
-        return EXIT_FAILURE;
-    }
-    
-    auto start = chrono::high_resolution_clock::now();
+	gengetopt_args_info args_info;
+	if (0 != cmdline_parser(argc, argv, &args_info))
+		return EXIT_FAILURE;
 
-    std::vector<std::string> MSA;
-    read_input(args_info.input_arg, gap_limit, MSA);
-    if (MSA.empty())
+	std::ios_base::sync_with_stdio(false);    // Don't use C style IO after calling cmdline_parser.
+
+	auto const gap_limit(args_info.gap_limit_arg);
+	if (gap_limit < 0)
+	{
+		std::cerr << "Gap limit needs to be non-negative.\n";
+		return EXIT_FAILURE;
+	}
+	const bool elastic(args_info.elastic_flag);
+	const bool output_paths(args_info.output_paths_flag);
+	if (!elastic && output_paths)
+	{
+		std::cerr << "Output of original sequences as paths without option --elastic is not implemented!\n";
+		return EXIT_FAILURE;
+	}
+	const bool output_gfa_format(args_info.gfa_flag);
+	if (!elastic && output_gfa_format)
+	{
+		std::cerr << "xGFA output without option --elastic not yet implemented!\n";
+		return EXIT_FAILURE;
+	}
+
+	auto start = chrono::high_resolution_clock::now();
+
+	std::vector<std::string> MSA;
+	std::vector<std::string> identifiers;
+	read_input(args_info.input_arg, gap_limit, elastic, MSA, output_paths, identifiers);
+	if (MSA.empty())
 	{
 		std::cerr << "Unable to read sequences from the input\n.";
 		return EXIT_FAILURE;
 	}
-    std::cout << "Input MSA[1.." << MSA.size() << ",1.." << MSA[0].size() << "]" << std::endl;   
-    
-    cst_type cst;
-    if (!load_cst(args_info.input_arg, MSA, cst, gap_limit))
-        return EXIT_FAILURE;
-    
-    std::cout << "Index construction complete, index requires " << sdsl::size_in_mega_bytes(cst) << " MiB." << std::endl;
+	std::cerr << "Input MSA[1.." << MSA.size() << ",1.." << MSA[0].size() << "]" << std::endl;   
 
-    std::vector <std::string> node_labels;
-    adjacency_list edges;
-    if (gap_limit == 1) // no gaps
-       segment(MSA, cst, node_labels, edges);
-    else
-       segment2elasticValid(MSA, cst, node_labels, edges);
-    
-    std::cout << "Writing the index to disk…\n";
-    make_index(node_labels, edges, args_info.output_arg, args_info.memory_chart_output_arg);
+	// compute compressed suffix tree of the MSA (or load it if created in a previous run)
+	cst_type cst;
+	if (!load_cst(args_info.input_arg, MSA, cst, gap_limit))
+		return EXIT_FAILURE;
 
-    auto end = chrono::high_resolution_clock::now();
-    auto duration = chrono::duration_cast<chrono::seconds>(end - start);
-    
-    if (args_info.graphviz_output_given)
-    {
-        std::cout << "Writing the Graphviz file…\n";
-        output_graphviz(node_labels, edges, args_info.graphviz_output_arg);
-    }
-    
-    std::cout << "Time taken: "
-         << duration.count() << " seconds" << std::endl;
-    
-    return EXIT_SUCCESS;
+	std::cerr << "MSA index construction complete, index requires " << sdsl::size_in_mega_bytes(cst) << " MiB." << std::endl;
+
+	std::vector <std::string> node_labels;
+	std::vector <size_type> node_blocks; // index of the corresponding block
+	std::vector <size_type> block_indices; // starting index of each block
+	adjacency_list edges;
+	std::vector<std::vector<size_type>> paths;
+	int status;
+	if (elastic) { // semi-repeat-free efg
+		status = segment_elastic_minmaxlength(MSA, cst, node_labels, node_blocks, block_indices, edges, output_paths, paths);
+	} else if (gap_limit == 1) { // no gaps
+		status = segment(MSA, cst, node_labels, edges);
+	} else {
+		status = segment2elasticValid(MSA, cst, node_labels, edges);
+	}
+
+	if (status == EXIT_FAILURE)
+		return EXIT_FAILURE;
+
+	if (!elastic)
+	{
+		if (!output_gfa_format) {
+			std::cerr << "Writing the index to disk…\n";
+			make_index(node_labels, edges, args_info.output_arg, args_info.memory_chart_output_arg);
+		} else {
+			std::cerr << "Writing the xGFA to disk…\n";
+			make_gfa(MSA, identifiers, node_labels, edges, node_blocks, block_indices, output_paths, paths, args_info.output_arg, args_info.memory_chart_output_arg);
+		}
+	}
+	if (elastic)
+	{
+		if (!output_gfa_format) {
+			std::cerr << "Writing the index to disk…\n";
+			make_index(node_labels, edges, args_info.output_arg, args_info.memory_chart_output_arg);
+		} else {
+			std::cerr << "Writing the xGFA to disk…\n";
+			make_gfa(MSA, identifiers, node_labels, edges, node_blocks, block_indices, output_paths, paths, args_info.output_arg, args_info.memory_chart_output_arg);
+		}
+	}
+
+	auto end = chrono::high_resolution_clock::now();
+	auto duration = chrono::duration_cast<chrono::seconds>(end - start);
+
+	if (args_info.graphviz_output_given)
+	{
+		std::cerr << "Writing the Graphviz file…\n";
+		output_graphviz(node_labels, edges, args_info.graphviz_output_arg);
+	}
+
+	std::cerr << "Time taken: "
+		<< duration.count() << " seconds" << std::endl;
+
+	return EXIT_SUCCESS;
 }
