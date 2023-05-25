@@ -785,7 +785,7 @@ namespace {
 							    size_type g = cst.depth(cst.parent(w)) + 1;
 							    size_type gg = indexedrows_rs[ii].rank(x) + g;
 							    size_type fi;
-							    if (gg >= indexedrows_rs[ii].rank(n)) {
+							    if (gg > indexedrows_rs[ii].rank(n)) {
 								    fi = n;
 							    } else {
 								    fi = indexedrows_ss[ii].select(indexedrows_rs[ii].rank(x) + g);
