@@ -400,7 +400,7 @@ namespace {
 
 		/* Convert segmentation into founder block graph */
 		std::unordered_map<std::string, size_type> str2id;
-		size_type nodecount = 0; 
+		size_type nodecount = 0;
 		size_type previndex = 0;
 
 		typedef std::vector<size_type> block_vector;
@@ -422,12 +422,12 @@ namespace {
 		for (const auto& pair : str2id) {
 			labels[pair.second] = pair.first;
 		}
-		size_type totallength = 0; 
+		size_type totallength = 0;
 		for (size_type i=0; i<nodecount; i++)
 			totallength += labels[i].size();
 
 		std::cerr << "#nodes=" << nodecount << std::endl;
-		std::cerr << "total length of node labels=" << totallength << std::endl; 
+		std::cerr << "total length of node labels=" << totallength << std::endl;
 
 		size_type nfounders=0;
 		for (size_type j=0; j<boundaries.size(); j++)
@@ -443,7 +443,7 @@ namespace {
 			{
 
 				ellv = remove_gaps(MSA[i].substr(previndex,boundaries[k]-previndex+1));
-				ellw = remove_gaps(MSA[i].substr(boundaries[k]+1,boundaries[k+1]-boundaries[k]));  
+				ellw = remove_gaps(MSA[i].substr(boundaries[k]+1,boundaries[k+1]-boundaries[k]));
 				auto const &src_node_label(ellv);
 				auto const &dst_node_label(ellw);
 				auto const src_node_idx_it(str2id.find(src_node_label));
@@ -624,12 +624,12 @@ namespace {
 		for (const auto& pair : str2id) {
 			labels[pair.second] = pair.first;
 		}
-		size_type totallength = 0; 
+		size_type totallength = 0;
 		for (size_type i=0; i<nodecount; i++)
 			totallength += labels[i].size();
 
 		std::cerr << "#nodes=" << nodecount << std::endl;
-		std::cerr << "total length of node labels=" << totallength << std::endl; 
+		std::cerr << "total length of node labels=" << totallength << std::endl;
 
 		size_type nfounders=0;
 		for (size_type j=0; j<boundaries.size(); j++)
@@ -644,7 +644,7 @@ namespace {
 			for (size_type i=0; i<m; i++)
 			{
 				ellv = remove_gaps(MSA[i].substr(previndex,boundaries[k]-previndex+1));
-				ellw = remove_gaps(MSA[i].substr(boundaries[k]+1,boundaries[k+1]-boundaries[k]));  
+				ellw = remove_gaps(MSA[i].substr(boundaries[k]+1,boundaries[k+1]-boundaries[k]));
 				auto const &src_node_label(ellv);
 				auto const &dst_node_label(ellw);
 				auto const src_node_idx_it(str2id.find(src_node_label));
@@ -669,15 +669,114 @@ namespace {
 		return EXIT_SUCCESS;
 	}
 
-	int segment_elastic_minmaxlength(
-			std::vector<std::string> const &MSA,
-			cst_type const &cst,
+	void make_efg(
+			const std::vector<size_type> &boundaries,
+			const std::vector<std::string> &MSA,
 			std::vector <std::string> &out_labels,
 			std::vector <size_type> &out_blocks,
-			std::vector <size_type> &out_indices,
 			adjacency_list &out_edges,
 			bool output_paths,
 			std::vector<std::vector<size_type>> &out_paths
+	) {
+		/* Convert arbitrary segmentation into EFG */
+		// TODO: check, O(log(n)) complexity of operations?
+		size_type const m = MSA.size();
+
+		//std::unordered_map<std::string, std::pair<size_type,size_type>> str2id; // map label -> node_id, block?
+		std::vector<std::unordered_map<std::string, std::pair<size_type,size_type>>> str2ids (boundaries.size()); // map label -> node_id, block?
+		size_type nodecount = 0;
+		size_type previndex = 0;
+
+		typedef std::vector<size_type> block_vector;
+		typedef std::vector<block_vector> block_matrix;
+		block_matrix blocks(boundaries.size());
+		std::string ellv, ellw;
+		std::vector<std::vector<size_type>> paths (m, std::vector<size_type>());
+		for (size_type j=0; j<boundaries.size(); j++) {
+			for (size_type i=0; i<m; i++) {
+				ellv = remove_gaps(MSA[i].substr(previndex,boundaries[j]-previndex+1));
+				if (ellv.length() == 0)
+					continue;
+				if (!str2ids[j].count(ellv)) {
+					blocks[j].push_back(nodecount);
+					std::pair p(nodecount++, j);
+					str2ids[j][ellv] = p;
+					//std::cerr << "p.first = " << p.first << " and p.second = " << p.second << "\n";
+				}
+				if (output_paths) paths[i].push_back(str2ids[j][ellv].first);
+			}
+			previndex = boundaries[j]+1;
+		}
+		/*std::cerr << "My paths are: " << std::endl;
+		  for (size_type i = 0; i < m; i++) {
+		  std::cerr << i << ": ";
+		  for (auto s : paths[i]) {
+		  std::cerr << s+1 << " ";
+		  }
+		  std::cerr << std::endl;
+		  }*/
+
+		std::vector<std::string> labels(nodecount);
+		std::vector<size_type> bblocks(nodecount);
+		for (auto &str2id : str2ids) {
+			for (const auto& pair : str2id) {
+				labels[pair.second.first] = pair.first;
+				bblocks[pair.second.first] = pair.second.second;
+			}
+		}
+		size_type totallength = 0;
+		for (size_type i=0; i<nodecount; i++)
+			totallength += labels[i].size();
+
+		std::cerr << "#nodes=" << nodecount << std::endl;
+		std::cerr << "total length of node labels=" << totallength << std::endl;
+
+		/*size_type nfounders=0;
+		  for (size_type j=0; j<boundaries.size(); j++)
+		  if (blocks[j].size()>nfounders)
+		  nfounders = blocks[j].size();
+		  std::cerr << "#founders=" << nfounders << std::endl;*/
+
+		adjacency_list edges(nodecount);
+		previndex = 0;
+		for (size_type k=0; k<boundaries.size()-1; k++)
+		{
+			for (size_type i=0; i<m; i++)
+			{
+				ellv = remove_gaps(MSA[i].substr(previndex,boundaries[k]-previndex+1));
+				ellw = remove_gaps(MSA[i].substr(boundaries[k]+1,boundaries[k+1]-boundaries[k]));
+				if (ellv.length() == 0 || ellw.length() == 0)
+					continue;
+				auto const &src_node_label(ellv);
+				auto const &dst_node_label(ellw);
+				auto const src_node_idx_it(str2ids[k].find(src_node_label));
+				auto const dst_node_idx_it(str2ids[k+1].find(dst_node_label));
+				assert(src_node_idx_it != str2ids[k].end());
+				assert(dst_node_idx_it != str2ids[k+1].end());
+				auto const src_node_idx(src_node_idx_it->second);
+				auto const dst_node_idx(dst_node_idx_it->second);
+				edges[src_node_idx.first].insert(dst_node_idx.first);
+			}
+
+			previndex = boundaries[k]+1;
+		}
+		size_type edgecount = 0;
+		for (size_type i=0; i<nodecount; i++)
+			edgecount += edges[i].size();
+		std::cerr << "#edges=" << edgecount << std::endl;
+
+		using std::swap;
+		swap(out_labels, labels);
+		swap(out_blocks, bblocks);
+		swap(out_edges, edges);
+		swap(out_paths, paths);
+		std::cerr << std::flush;
+	}
+
+	void segment_elastic_minmaxlength(
+			std::vector<std::string> const &MSA,
+			cst_type const &cst,
+			std::vector<size_type> &out_indices
 			) {
 		size_type const n = MSA[0].size();
 		size_type const m = MSA.size();
@@ -826,10 +925,11 @@ namespace {
 		  std::cerr << v << " ";
 		  std::cerr << std::endl << std::flush;*/
 
-		if (f[0] == n) {
+		// there is always a valid segmentation
+		/*if (f[0] == n) {
 			std::cerr << "No valid segmentation found!\n";
-			return EXIT_FAILURE;
-		}
+			return ;
+		}*/
 
 		// Sort the resulting pairs (x,f(x)), make f(x) 1-indexed
 		std::vector<std::pair<size_type,size_type>> minimal_right_extensions;
@@ -915,7 +1015,6 @@ namespace {
 		  std::cerr << std::endl;*/
 		std::cerr << "done (optimal segment length = " << minmaxlength[n] << ")." << std::endl << std::flush;
 
-		// TODO: abstract this code, it's taken from function segment2elasticValid()
 		// NB: added block info
 		std::list<size_type> boundariestemp;
 		size_type j = n;
@@ -930,92 +1029,7 @@ namespace {
 		for (const auto& j : boundariestemp)
 			boundaries.push_back(j);
 
-		/* Convert segmentation into founder block graph */
-		// TODO: check, O(log(n)) complexity of operations?
-		std::unordered_map<std::string, std::pair<size_type,size_type>> str2id; // map label -> node_id, block?
-		size_type nodecount = 0; 
-		size_type previndex = 0;
-
-		typedef std::vector<size_type> block_vector;
-		typedef std::vector<block_vector> block_matrix;
-		block_matrix blocks(boundaries.size());
-		std::string ellv, ellw;
-		std::vector<std::vector<size_type>> paths (m, std::vector<size_type>());
-		for (size_type j=0; j<boundaries.size(); j++) {
-			for (size_type i=0; i<m; i++) {
-				ellv = remove_gaps(MSA[i].substr(previndex,boundaries[j]-previndex+1));
-				if (!str2id.count(ellv)) {
-					blocks[j].push_back(nodecount);
-					std::pair p(nodecount++, j);
-					str2id[ellv] = p;
-					//std::cerr << "p.first = " << p.first << " and p.second = " << p.second << "\n";
-				}
-				if (output_paths) paths[i].push_back(str2id[ellv].first);
-			}
-			previndex = boundaries[j]+1;
-		}
-		/*std::cerr << "My paths are: " << std::endl;
-		  for (size_type i = 0; i < m; i++) {
-		  std::cerr << i << ": ";
-		  for (auto s : paths[i]) {
-		  std::cerr << s+1 << " ";
-		  }
-		  std::cerr << std::endl;
-		  }*/
-
-		std::vector<std::string> labels(nodecount);
-		std::vector<size_type> bblocks(nodecount);
-		for (const auto& pair : str2id) {
-			labels[pair.second.first] = pair.first;
-			bblocks[pair.second.first] = pair.second.second;
-		}
-		size_type totallength = 0; 
-		for (size_type i=0; i<nodecount; i++)
-			totallength += labels[i].size();
-
-		std::cerr << "#nodes=" << nodecount << std::endl;
-		std::cerr << "total length of node labels=" << totallength << std::endl; 
-
-		/*size_type nfounders=0;
-		  for (size_type j=0; j<boundaries.size(); j++)
-		  if (blocks[j].size()>nfounders)
-		  nfounders = blocks[j].size();
-		  std::cerr << "#founders=" << nfounders << std::endl;*/
-
-		adjacency_list edges(nodecount);
-		previndex = 0;
-		for (size_type k=0; k<boundaries.size()-1; k++)
-		{
-			for (size_type i=0; i<m; i++)
-			{
-				ellv = remove_gaps(MSA[i].substr(previndex,boundaries[k]-previndex+1));
-				ellw = remove_gaps(MSA[i].substr(boundaries[k]+1,boundaries[k+1]-boundaries[k]));  
-				auto const &src_node_label(ellv);
-				auto const &dst_node_label(ellw);
-				auto const src_node_idx_it(str2id.find(src_node_label));
-				auto const dst_node_idx_it(str2id.find(dst_node_label));
-				assert(src_node_idx_it != str2id.end());
-				assert(dst_node_idx_it != str2id.end());
-				auto const src_node_idx(src_node_idx_it->second);
-				auto const dst_node_idx(dst_node_idx_it->second);
-				edges[src_node_idx.first].insert(dst_node_idx.first);
-			}
-
-			previndex = boundaries[k]+1;
-		}
-		size_type edgecount = 0;
-		for (size_type i=0; i<nodecount; i++)
-			edgecount += edges[i].size();
-		std::cerr << "#edges=" << edgecount << std::endl;
-
-		using std::swap;
-		swap(out_labels, labels);
-		swap(out_blocks, bblocks);
-		swap(out_indices, boundaries);
-		swap(out_edges, edges);
-		swap(out_paths, paths);
-		std::cerr << std::flush;
-		return 0;
+		std::swap(boundaries, out_indices);
 	}
 
 	void make_index(
@@ -1358,9 +1372,10 @@ int main(int argc, char **argv)
 	std::vector <size_type> block_indices; // starting index of each block
 	adjacency_list edges;
 	std::vector<std::vector<size_type>> paths;
-	int status;
+	int status = EXIT_SUCCESS;
 	if (elastic) { // semi-repeat-free efg
-		status = segment_elastic_minmaxlength(MSA, cst, node_labels, node_blocks, block_indices, edges, output_paths, paths);
+		segment_elastic_minmaxlength(MSA, cst, block_indices);
+		make_efg(block_indices, MSA, node_labels, node_blocks, edges, output_paths, paths);
 	} else if (gap_limit == 1) { // no gaps
 		status = segment(MSA, cst, node_labels, edges);
 	} else {
