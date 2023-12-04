@@ -830,8 +830,10 @@ namespace {
 		/* This is a preprocessing part of the main algorithm */
 		/* Find the nodes corresponding to reading each whole row */
 		std::vector<node_t> leaves(m, cst.root());
+		std::unordered_map<size_type, size_type>  leavesmap;
 		for (size_type next = 0, i = 0; i < m; i++) {
 			leaves[i] = cst.select_leaf(cst.csa.isa[next] + 1);
+			leavesmap[cst.lb(leaves[i])] = i;
 			next += indexedrows_rs[i].rank(n) + 1;
 		}
 
@@ -880,7 +882,8 @@ namespace {
 							// parent fails so w is an exclusive ancestor
 							for (size_type ll = cst.lb(w); ll <= cst.rb(w); ll++) {
 								// get row
-								size_type ii = concatenated_rows_rs.rank(cst.sn(cst.select_leaf(ll + 1)));
+								size_type ii = leavesmap[ll];
+								assert(leavesmap.count(ll) > 0);
 								size_type g = cst.depth(cst.parent(w)) + 1;
 								size_type gg = indexedrows_rs[ii].rank(x) + g;
 								size_type fi;
@@ -905,8 +908,11 @@ namespace {
 				for (size_type ll = cst.lb(leaves[i]); ll <= cst.rb(leaves[i]); ll++) { // cst is not a generalized suffix tree
 					color[ll] = false;
 				}
-				if (MSA[i][x] != '-')
+				if (MSA[i][x] != '-') {
+					leavesmap.erase(cst.lb(leaves[i]));
 					leaves[i] = cst.sl(leaves[i]);
+					leavesmap[cst.lb(leaves[i])] = i;
+				}
 			}
 		}
 
