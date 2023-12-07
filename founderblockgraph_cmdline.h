@@ -31,7 +31,7 @@ extern "C" {
 
 #ifndef CMDLINE_PARSER_VERSION
 /** @brief the program version */
-#define CMDLINE_PARSER_VERSION "0.3"
+#define CMDLINE_PARSER_VERSION "0.4"
 #endif
 
 /** @brief Where the command line options are stored */
@@ -48,29 +48,33 @@ struct gengetopt_args_info
   long gap_limit_arg;	/**< @brief Gap limit (suppressed by --elastic) (default='1').  */
   char * gap_limit_orig;	/**< @brief Gap limit (suppressed by --elastic) original value given at command line.  */
   const char *gap_limit_help; /**< @brief Gap limit (suppressed by --elastic) help description.  */
-  int elastic_flag;	/**< @brief Min-max-length semi-repeat-free segmentation (default=off).  */
-  const char *elastic_help; /**< @brief Min-max-length semi-repeat-free segmentation help description.  */
-  int gfa_flag;	/**< @brief Saves output in xGFA format (default=off).  */
-  const char *gfa_help; /**< @brief Saves output in xGFA format help description.  */
-  int output_paths_flag;	/**< @brief Print the original sequences as paths of the xGFA graph (requires --gfa). (default=off).  */
-  const char *output_paths_help; /**< @brief Print the original sequences as paths of the xGFA graph (requires --gfa). help description.  */
   char * graphviz_output_arg;	/**< @brief Graphviz output path.  */
   char * graphviz_output_orig;	/**< @brief Graphviz output path original value given at command line.  */
   const char *graphviz_output_help; /**< @brief Graphviz output path help description.  */
   char * memory_chart_output_arg;	/**< @brief Memory chart output path.  */
   char * memory_chart_output_orig;	/**< @brief Memory chart output path original value given at command line.  */
   const char *memory_chart_output_help; /**< @brief Memory chart output path help description.  */
+  int elastic_flag;	/**< @brief Min-max-length semi-repeat-free segmentation (default=off).  */
+  const char *elastic_help; /**< @brief Min-max-length semi-repeat-free segmentation help description.  */
+  int gfa_flag;	/**< @brief Saves output in xGFA format (default=off).  */
+  const char *gfa_help; /**< @brief Saves output in xGFA format help description.  */
+  int output_paths_flag;	/**< @brief Print the original sequences as paths of the xGFA graph (requires --gfa) (default=off).  */
+  const char *output_paths_help; /**< @brief Print the original sequences as paths of the xGFA graph (requires --gfa) help description.  */
+  char * ignore_chars_arg;	/**< @brief Ignore these characters for the indexability property/pattern matching.  */
+  char * ignore_chars_orig;	/**< @brief Ignore these characters for the indexability property/pattern matching original value given at command line.  */
+  const char *ignore_chars_help; /**< @brief Ignore these characters for the indexability property/pattern matching help description.  */
   
   unsigned int help_given ;	/**< @brief Whether help was given.  */
   unsigned int version_given ;	/**< @brief Whether version was given.  */
   unsigned int input_given ;	/**< @brief Whether input was given.  */
   unsigned int output_given ;	/**< @brief Whether output was given.  */
   unsigned int gap_limit_given ;	/**< @brief Whether gap-limit was given.  */
+  unsigned int graphviz_output_given ;	/**< @brief Whether graphviz-output was given.  */
+  unsigned int memory_chart_output_given ;	/**< @brief Whether memory-chart-output was given.  */
   unsigned int elastic_given ;	/**< @brief Whether elastic was given.  */
   unsigned int gfa_given ;	/**< @brief Whether gfa was given.  */
   unsigned int output_paths_given ;	/**< @brief Whether output-paths was given.  */
-  unsigned int graphviz_output_given ;	/**< @brief Whether graphviz-output was given.  */
-  unsigned int memory_chart_output_given ;	/**< @brief Whether memory-chart-output was given.  */
+  unsigned int ignore_chars_given ;	/**< @brief Whether ignore-chars was given.  */
 
 } ;
 

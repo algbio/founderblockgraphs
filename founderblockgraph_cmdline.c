@@ -27,7 +27,7 @@
 
 const char *gengetopt_args_info_purpose = "Constructs a semi-repeat-free (Elastic) Founder Graph";
 
-const char *gengetopt_args_info_usage = "Usage: founderblockgraph --input=MSA.fasta --output={MSA.index|efg.xgfa} [--elastic]\n[--gap-limit=GAPLIMIT] [--threads=THREADNUM] [--graphviz-output=…]\n[--output-paths]";
+const char *gengetopt_args_info_usage = "Usage: founderblockgraph --input=MSA.fasta --output={MSA.index|efg.xgfa} [--gfa]\n[--elastic] [--gap-limit=GAPLIMIT] [--threads=THREADNUM]\n[--graphviz-output=efg.dot] [--output-paths] [--ignore-chars=\"ALPHABET\"]";
 
 const char *gengetopt_args_info_versiontext = "";
 
@@ -39,11 +39,12 @@ const char *gengetopt_args_info_help[] = {
   "      --input=filename          MSA input path",
   "      --output=filename         Index/EFG output path",
   "      --gap-limit=GAPLIMIT      Gap limit (suppressed by --elastic)\n                                  (default=`1')",
-  "  -e, --elastic                 Min-max-length semi-repeat-free segmentation\n                                  (default=off)",
-  "      --gfa                     Saves output in xGFA format  (default=off)",
-  "  -p, --output-paths            Print the original sequences as paths of the\n                                  xGFA graph (requires --gfa).  (default=off)",
   "      --graphviz-output=filename\n                                Graphviz output path",
   "      --memory-chart-output=filename\n                                Memory chart output path",
+  "  -e, --elastic                 Min-max-length semi-repeat-free segmentation\n                                  (default=off)",
+  "      --gfa                     Saves output in xGFA format  (default=off)",
+  "  -p, --output-paths            Print the original sequences as paths of the\n                                  xGFA graph (requires --gfa)  (default=off)",
+  "      --ignore-chars=STRING     Ignore these characters for the indexability\n                                  property/pattern matching",
     0
 };
 
@@ -76,11 +77,12 @@ void clear_given (struct gengetopt_args_info *args_info)
   args_info->input_given = 0 ;
   args_info->output_given = 0 ;
   args_info->gap_limit_given = 0 ;
+  args_info->graphviz_output_given = 0 ;
+  args_info->memory_chart_output_given = 0 ;
   args_info->elastic_given = 0 ;
   args_info->gfa_given = 0 ;
   args_info->output_paths_given = 0 ;
-  args_info->graphviz_output_given = 0 ;
-  args_info->memory_chart_output_given = 0 ;
+  args_info->ignore_chars_given = 0 ;
 }
 
 static
@@ -93,13 +95,15 @@ void clear_args (struct gengetopt_args_info *args_info)
   args_info->output_orig = NULL;
   args_info->gap_limit_arg = 1;
   args_info->gap_limit_orig = NULL;
-  args_info->elastic_flag = 0;
-  args_info->gfa_flag = 0;
-  args_info->output_paths_flag = 0;
   args_info->graphviz_output_arg = NULL;
   args_info->graphviz_output_orig = NULL;
   args_info->memory_chart_output_arg = NULL;
   args_info->memory_chart_output_orig = NULL;
+  args_info->elastic_flag = 0;
+  args_info->gfa_flag = 0;
+  args_info->output_paths_flag = 0;
+  args_info->ignore_chars_arg = NULL;
+  args_info->ignore_chars_orig = NULL;
   
 }
 
@@ -113,11 +117,12 @@ void init_args_info(struct gengetopt_args_info *args_info)
   args_info->input_help = gengetopt_args_info_help[2] ;
   args_info->output_help = gengetopt_args_info_help[3] ;
   args_info->gap_limit_help = gengetopt_args_info_help[4] ;
-  args_info->elastic_help = gengetopt_args_info_help[5] ;
-  args_info->gfa_help = gengetopt_args_info_help[6] ;
-  args_info->output_paths_help = gengetopt_args_info_help[7] ;
-  args_info->graphviz_output_help = gengetopt_args_info_help[8] ;
-  args_info->memory_chart_output_help = gengetopt_args_info_help[9] ;
+  args_info->graphviz_output_help = gengetopt_args_info_help[5] ;
+  args_info->memory_chart_output_help = gengetopt_args_info_help[6] ;
+  args_info->elastic_help = gengetopt_args_info_help[7] ;
+  args_info->gfa_help = gengetopt_args_info_help[8] ;
+  args_info->output_paths_help = gengetopt_args_info_help[9] ;
+  args_info->ignore_chars_help = gengetopt_args_info_help[10] ;
   
 }
 
@@ -216,6 +221,8 @@ cmdline_parser_release (struct gengetopt_args_info *args_info)
   free_string_field (&(args_info->graphviz_output_orig));
   free_string_field (&(args_info->memory_chart_output_arg));
   free_string_field (&(args_info->memory_chart_output_orig));
+  free_string_field (&(args_info->ignore_chars_arg));
+  free_string_field (&(args_info->ignore_chars_orig));
   
   
 
@@ -256,16 +263,18 @@ cmdline_parser_dump(FILE *outfile, struct gengetopt_args_info *args_info)
     write_into_file(outfile, "output", args_info->output_orig, 0);
   if (args_info->gap_limit_given)
     write_into_file(outfile, "gap-limit", args_info->gap_limit_orig, 0);
+  if (args_info->graphviz_output_given)
+    write_into_file(outfile, "graphviz-output", args_info->graphviz_output_orig, 0);
+  if (args_info->memory_chart_output_given)
+    write_into_file(outfile, "memory-chart-output", args_info->memory_chart_output_orig, 0);
   if (args_info->elastic_given)
     write_into_file(outfile, "elastic", 0, 0 );
   if (args_info->gfa_given)
     write_into_file(outfile, "gfa", 0, 0 );
   if (args_info->output_paths_given)
     write_into_file(outfile, "output-paths", 0, 0 );
-  if (args_info->graphviz_output_given)
-    write_into_file(outfile, "graphviz-output", args_info->graphviz_output_orig, 0);
-  if (args_info->memory_chart_output_given)
-    write_into_file(outfile, "memory-chart-output", args_info->memory_chart_output_orig, 0);
+  if (args_info->ignore_chars_given)
+    write_into_file(outfile, "ignore-chars", args_info->ignore_chars_orig, 0);
   
 
   i = EXIT_SUCCESS;
@@ -565,11 +574,12 @@ cmdline_parser_internal (
         { "input",	1, NULL, 0 },
         { "output",	1, NULL, 0 },
         { "gap-limit",	1, NULL, 0 },
+        { "graphviz-output",	1, NULL, 0 },
+        { "memory-chart-output",	1, NULL, 0 },
         { "elastic",	0, NULL, 'e' },
         { "gfa",	0, NULL, 0 },
         { "output-paths",	0, NULL, 'p' },
-        { "graphviz-output",	1, NULL, 0 },
-        { "memory-chart-output",	1, NULL, 0 },
+        { "ignore-chars",	1, NULL, 0 },
         { 0,  0, 0, 0 }
       };
 
@@ -599,7 +609,7 @@ cmdline_parser_internal (
             goto failure;
         
           break;
-        case 'p':	/* Print the original sequences as paths of the xGFA graph (requires --gfa)..  */
+        case 'p':	/* Print the original sequences as paths of the xGFA graph (requires --gfa).  */
         
         
           if (update_arg((void *)&(args_info->output_paths_flag), 0, &(args_info->output_paths_given),
@@ -653,18 +663,6 @@ cmdline_parser_internal (
               goto failure;
           
           }
-          /* Saves output in xGFA format.  */
-          else if (strcmp (long_options[option_index].name, "gfa") == 0)
-          {
-          
-          
-            if (update_arg((void *)&(args_info->gfa_flag), 0, &(args_info->gfa_given),
-                &(local_args_info.gfa_given), optarg, 0, 0, ARG_FLAG,
-                check_ambiguity, override, 1, 0, "gfa", '-',
-                additional_error))
-              goto failure;
-          
-          }
           /* Graphviz output path.  */
           else if (strcmp (long_options[option_index].name, "graphviz-output") == 0)
           {
@@ -689,6 +687,32 @@ cmdline_parser_internal (
                 &(local_args_info.memory_chart_output_given), optarg, 0, 0, ARG_STRING,
                 check_ambiguity, override, 0, 0,
                 "memory-chart-output", '-',
+                additional_error))
+              goto failure;
+          
+          }
+          /* Saves output in xGFA format.  */
+          else if (strcmp (long_options[option_index].name, "gfa") == 0)
+          {
+          
+          
+            if (update_arg((void *)&(args_info->gfa_flag), 0, &(args_info->gfa_given),
+                &(local_args_info.gfa_given), optarg, 0, 0, ARG_FLAG,
+                check_ambiguity, override, 1, 0, "gfa", '-',
+                additional_error))
+              goto failure;
+          
+          }
+          /* Ignore these characters for the indexability property/pattern matching.  */
+          else if (strcmp (long_options[option_index].name, "ignore-chars") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->ignore_chars_arg), 
+                 &(args_info->ignore_chars_orig), &(args_info->ignore_chars_given),
+                &(local_args_info.ignore_chars_given), optarg, 0, 0, ARG_STRING,
+                check_ambiguity, override, 0, 0,
+                "ignore-chars", '-',
                 additional_error))
               goto failure;
           

@@ -776,26 +776,34 @@ namespace {
 	void segment_elastic_minmaxlength(
 			std::vector<std::string> const &MSA,
 			cst_type const &cst,
+			std::string &ignorechars,
 			std::vector<size_type> &out_indices
 			) {
 		size_type const n = MSA[0].size();
 		size_type const m = MSA.size();
 		size_type nongap = 0;
+		size_type toignore = 0;
 		for (size_type i = 0; i < m; i++) { // TODO: MSA struct
 			for (size_type j = 0; j < n; j++) {
 				if (MSA[i][j] != '-')
 					nongap += 1;
+				if (ignorechars.find(MSA[i][j]) != std::string::npos)
+					toignore += 1;
 			}
 		}
 
 		std::cerr << "MSA contains " << (n*m) - nongap  << " gaps.\n" << std::flush;
+		std::cerr << "MSA contains " << toignore  << " characters to ignore for the semi-repeat-free property.\n" << std::flush;
 
 		// Preprocess the MSA rows for rank, select queries
 		std::vector<sdsl::bit_vector> indexedrows(m, sdsl::bit_vector(n, 1));
+		std::vector<sdsl::bit_vector> rowsignore(m, sdsl::bit_vector(n, 0)); // ignore chars
 		for (size_type i = 0; i < m; i++) {
 			for (size_type j = 0; j < n; j++) {
 				if (MSA[i][j] == '-')
 					indexedrows[i][j] = 0;
+				if (ignorechars.find(MSA[i][j]) != std::string::npos)
+					rowsignore[i][j] = 1;
 			}
 		}
 
@@ -813,6 +821,24 @@ namespace {
 		for (size_type i = 0; i < m; i++) {
 			sdsl::select_support_mcl<> ss(&indexedrows[i]);
 			indexedrows_ss[i] = ss;
+		}
+
+		// rank, select on ignore chars
+		std::vector<sdsl::rank_support_v5<>> rowsignore_rs;
+		if (ignorechars.length() > 0) {
+			rowsignore_rs.resize(m);
+			for (size_type i = 0; i < m; i++) {
+				sdsl::rank_support_v5<> rs(&rowsignore[i]);
+				rowsignore_rs[i] = rs;
+			}
+		}
+		std::vector<sdsl::select_support_mcl<>> rowsignore_ss;
+		if (ignorechars.length() > 0) {
+			rowsignore_ss.resize(m);
+			for (size_type i = 0; i < m; i++) {
+				sdsl::select_support_mcl<> ss(&rowsignore[i]);
+				rowsignore_ss[i] = ss;
+			}
 		}
 
 		// bitvector + rank and select support for finding corresponding row
@@ -836,6 +862,7 @@ namespace {
 			leavesmap[cst.lb(leaves[i])] = i;
 			next += indexedrows_rs[i].rank(n) + 1;
 		}
+		sdsl::bit_vector fullrow(m, true); // mark if leaves[i] is still the initial value
 
 		/* binary coloring of the leaves */
 		sdsl::bit_vector color(cst.size(cst.root()), false);
@@ -850,10 +877,12 @@ namespace {
 			  std::cerr << l << " ";
 			  std::cerr << std::endl;*/
 
-			size_type fimax = 0;
-			// Mark each leaf in leaves
-			for (auto l : leaves) {
-				for (size_type ll = cst.lb(l); ll <= cst.rb(l); ll++) { // cst is not a generalized suffix tree
+			size_type fimax = x;
+			// Mark each leaf in leaves, filtering first all leaves corresponding to full rows
+			for (size_type i = 0; i < m; i++) {
+				if (fullrow[i])
+					continue;
+				for (size_type ll = cst.lb(leaves[i]); ll <= cst.rb(leaves[i]); ll++) { // cst is not a generalized suffix tree
 					color[ll] = true;
 				}
 			}
@@ -861,6 +890,8 @@ namespace {
 			// Process each set of contiguous leaves
 			for (size_type i = 0; i < m; i++) {
 				node_t const l = leaves[i];
+				if (fullrow[i])
+					continue;
 				if (cst.lb(l) == 0 || color[cst.lb(l) - 1] == false) {
 					// if leftmost leaf does not correspond to row i, skip
 					if (concatenated_rows_rs.rank(cst.sn(cst.select_leaf(cst.lb(l) + 1))) != i)
@@ -888,10 +919,14 @@ namespace {
 								size_type gg = indexedrows_rs[ii].rank(x) + g;
 								size_type fi;
 								if (gg > indexedrows_rs[ii].rank(n)) {
-									fi = n;
+									fi = indexedrows_ss[ii].select(indexedrows_rs[ii].rank(n));
+									// fi can be less than x here but it's still correct
 								} else {
 									fi = indexedrows_ss[ii].select(indexedrows_rs[ii].rank(x) + g);
 								}
+								// filter for first occurrence of ignore char
+								if (ignorechars.length() > 0 && rowsignore_rs[ii].rank(x) != rowsignore_rs[ii].rank(n))
+									fi = std::min(rowsignore_ss[ii].select(rowsignore_rs[ii].rank(x) + 1), fi);
 								if (fi > fimax)
 									fimax = fi;
 							}
@@ -912,30 +947,20 @@ namespace {
 					leavesmap.erase(cst.lb(leaves[i]));
 					leaves[i] = cst.sl(leaves[i]);
 					leavesmap[cst.lb(leaves[i])] = i;
+					fullrow[i] = false;
 				}
 			}
 		}
-
-		// Make the segment (0,k) semi-repeat-free, where k is the first (0-indexed) position where [0,k] is not the empty-string for each row
-		// TODO: test if this is useful and make it into an input parameter
-		f[0] = 0;
-		for (size_type i = 0; i < m; i++) {
-			f[0] = std::max(f[0], indexedrows_ss[i].select(1));
-		}
-		// Make the semi-repeat-free segments (x,n+1) into (x,n)
-		/*for (size_type j = 1; j < n; j++) {
-		  f[j] = std::min(f[j], n - 1);
-		  }*/
-		/*std::cerr << "f: ";
-		  for (auto v : f)
-		  std::cerr << v << " ";
-		  std::cerr << std::endl << std::flush;*/
 
 		// there is always a valid segmentation
 		/*if (f[0] == n) {
 			std::cerr << "No valid segmentation found!\n";
 			return ;
 		}*/
+		/*std::cerr << "f : ";
+		for (auto v : f)
+			std::cerr << v << " ";
+		std::cerr << std::endl;*/
 
 		// Sort the resulting pairs (x,f(x)), make f(x) 1-indexed
 		std::vector<std::pair<size_type,size_type>> minimal_right_extensions;
@@ -1241,7 +1266,7 @@ namespace {
 		for (size_t i = 0; i < node_labels.size(); ++i)
 		{
 			auto const &src_label(node_labels[i]);
-			dst_os << "S\t" << i+1 << "\t" << src_label << std::endl;
+			dst_os << "S\t" << i << "\t" << src_label << std::endl;
 		}
 
 		// edges
@@ -1252,7 +1277,7 @@ namespace {
 			std::vector<size_type> sorted_dst_nodes(dst_nodes.begin(), dst_nodes.end());
 			std::sort(sorted_dst_nodes.begin(), sorted_dst_nodes.end());
 			for (auto const dst_node : sorted_dst_nodes)
-				dst_os << "L\t" << i+1 << "\t+\t" << dst_node+1 << "\t+\t0M" << std::endl;
+				dst_os << "L\t" << i << "\t+\t" << dst_node << "\t+\t0M" << std::endl;
 		}
 
 		if (!output_paths) return;
@@ -1263,9 +1288,9 @@ namespace {
 			assert(identifiers.size() == paths.size());
 			dst_os << "P\t" << identifiers[i] << "\t";
 			for (size_type j = 0; j < paths[i].size() - 1; j++) {
-				dst_os << paths[i][j]+1 << "+,";
+				dst_os << paths[i][j] << "+,";
 			}
-			dst_os << paths[i][paths[i].size()-1]+1 << "+";
+			dst_os << paths[i][paths[i].size()-1] << "+";
 			dst_os << "\t*" << std::endl;
 		}
 	}
@@ -1354,6 +1379,12 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
+	std::string ignorechars;
+	if (args_info.ignore_chars_arg != NULL)
+		ignorechars = std::string(args_info.ignore_chars_arg);
+	else
+		ignorechars = "";
+
 	auto start = chrono::high_resolution_clock::now();
 
 	std::vector<std::string> MSA;
@@ -1380,7 +1411,7 @@ int main(int argc, char **argv)
 	std::vector<std::vector<size_type>> paths;
 	int status = EXIT_SUCCESS;
 	if (elastic) { // semi-repeat-free efg
-		segment_elastic_minmaxlength(MSA, cst, block_indices);
+		segment_elastic_minmaxlength(MSA, cst, ignorechars, block_indices);
 		make_efg(block_indices, MSA, node_labels, node_blocks, edges, output_paths, paths);
 	} else if (gap_limit == 1) { // no gaps
 		status = segment(MSA, cst, node_labels, edges);
