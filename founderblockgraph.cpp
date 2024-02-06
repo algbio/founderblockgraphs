@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <thread>         // std::thread
 #include "founderblockgraph_cmdline.h"
 #include "founder_block_index.hpp"
 
@@ -773,11 +774,427 @@ namespace {
 		std::cerr << std::flush;
 	}
 
+	/* 
+	 * compute_f_range accepts in input the MSA, its compressed suffix tree,
+	 * the relative sdsl data structures on its rows and a column interval
+	 * [startx..endx]. It computes the minimal right extension of x for x
+	 * in [startx..endx] and stores the values in f[x], such that
+	 * f[x] in minimum index >= x such that MSA[0..m-1][x..f[x]] is
+	 * semi-repeat-free.
+	 *
+	 * This implementation is O(l * m * log m), where l = endx - startx.
+	 */
+	void compute_f_range(
+			size_type const m,
+			size_type const n,
+			size_type const startx,
+			size_type const endx,
+			std::vector<size_type> &f, // store result here
+			std::vector<std::string> const &MSA,
+			cst_type const &cst,
+			std::string const &ignorechars,
+			std::vector<sdsl::rank_support_v5<>> const &rowsignore_rs,
+			std::vector<sdsl::select_support_mcl<>> const &rowsignore_ss,
+			sdsl::rank_support_v5<> const &concatenated_rows_rs,
+			std::vector<sdsl::rank_support_v5<>> const &indexedrows_rs,
+			std::vector<sdsl::select_support_mcl<>> const &indexedrows_ss
+			) {
+		// find leaves corresponding to suffixes starting at col x+1
+		std::vector<node_t> leaves(m, cst.root());
+		std::unordered_map<size_type, size_type>  leavesmap; // leaf index -> MSA row
+		for (size_type indexpos = 0, i = 0; i < m; i++) {
+			indexpos += indexedrows_rs[i].rank(startx);
+			leaves[i] = cst.select_leaf(cst.csa.isa[indexpos] + 1);
+			if (indexedrows_rs[i].rank(startx) != 0) {
+				leavesmap[cst.lb(leaves[i])] = i;
+			}
+			indexpos += indexedrows_rs[i].rank(n) - indexedrows_rs[i].rank(startx) + 1;
+		}
+
+		for (size_type x = startx; x <= endx; x++) {
+			/*std::cerr << "Computing f[x], with x = " << x << std::endl << std::flush;
+
+			  std::cerr << "leaves for f[" << x << "] are: ";
+			  for (auto l : leaves)
+			  std::cerr << l << " ";
+			  std::cerr << std::endl;*/
+
+			size_type fimax = x;
+
+			// Process each set of contiguous leaves
+			for (size_type i = 0; i < m; i++) {
+				node_t const l = leaves[i];
+				if (indexedrows_rs[i].rank(x) == 0)
+					continue;
+				if (cst.lb(l) == 0 || leavesmap.find(cst.lb(l) - 1) == leavesmap.end()) {
+					// if leftmost leaf does not correspond to row i, skip
+					if (concatenated_rows_rs.rank(cst.sn(cst.select_leaf(cst.lb(l) + 1))) != i)
+						break;
+					size_type lb = cst.lb(l);
+					size_type rb = cst.rb(l);
+					while (rb < cst.size(cst.root()) - 1 && leavesmap.find(cst.rb(cst.select_leaf(rb)) + 2) != leavesmap.end()) {
+						rb = rb + 1;
+					}
+
+					// Find the exclusive ancestors
+					node_t w = l;
+					while (cst.rb(w) <= rb) {
+						node_t parent = cst.parent(w);
+						if (lb <= cst.lb(parent) && cst.rb(parent) <= rb) {
+							// parent is a correct replacement
+							w = parent;
+						} else {
+							// parent fails so w is an exclusive ancestor
+							for (size_type ll = cst.lb(w); ll <= cst.rb(w); ll++) {
+								// get row
+								size_type ii = leavesmap[ll];
+								assert(leavesmap.count(ll) > 0);
+								size_type g = cst.depth(cst.parent(w)) + 1;
+								size_type gg = indexedrows_rs[ii].rank(x) + g;
+								size_type fi;
+								if (gg > indexedrows_rs[ii].rank(n)) {
+									fi = indexedrows_ss[ii].select(indexedrows_rs[ii].rank(n));
+									// fi can be less than x here but it's still correct
+								} else {
+									fi = indexedrows_ss[ii].select(indexedrows_rs[ii].rank(x) + g);
+								}
+								// filter for first occurrence of ignore char
+								if (ignorechars.length() > 0 && rowsignore_rs[ii].rank(x) != rowsignore_rs[ii].rank(n))
+									fi = std::min(rowsignore_ss[ii].select(rowsignore_rs[ii].rank(x) + 1), fi);
+								if (fi > fimax)
+									fimax = fi;
+							}
+							if (cst.rb(w) == cst.size(cst.root()) - 1)
+								break;
+							w = cst.select_leaf(cst.rb(w) + 2);
+						}
+					}
+				}
+			}
+			f[x] = fimax;
+
+			for (size_type i = 0; i < m; i++) {
+				if (MSA[i][x] != '-') {
+					leavesmap.erase(cst.lb(leaves[i]));
+					leaves[i] = cst.sl(leaves[i]);
+					leavesmap[cst.lb(leaves[i])] = i;
+				}
+			}
+		}
+	}
+
+	void compute_f(
+			size_type const m,
+			size_type const n,
+			std::vector<size_type> &f, // store result here
+			std::vector<std::string> const &MSA,
+			cst_type const &cst,
+			std::string const &ignorechars,
+			std::vector<sdsl::rank_support_v5<>> const &rowsignore_rs,
+			std::vector<sdsl::select_support_mcl<>> const &rowsignore_ss,
+			sdsl::rank_support_v5<> const &concatenated_rows_rs,
+			std::vector<sdsl::rank_support_v5<>> const &indexedrows_rs,
+			std::vector<sdsl::select_support_mcl<>> const &indexedrows_ss
+			) {
+		/* Find the nodes corresponding to reading each whole row */
+		std::vector<node_t> leaves(m, cst.root());
+		std::unordered_map<size_type, size_type>  leavesmap;
+		for (size_type next = 0, i = 0; i < m; i++) {
+			leaves[i] = cst.select_leaf(cst.csa.isa[next] + 1);
+			leavesmap[cst.lb(leaves[i])] = i;
+			next += indexedrows_rs[i].rank(n) + 1;
+		}
+
+		/* binary coloring of the leaves */
+		sdsl::bit_vector color(cst.size(cst.root()), false);
+		sdsl::bit_vector fullrow(m, true); // mark if leaves[i] is still the initial value
+		for (size_type x = 0; x < n; x++) {
+			/*std::cerr << "Computing f[x], with x = " << x << std::endl << std::flush;
+
+			  std::cerr << "leaves for f[" << x << "] are: ";
+			  for (auto l : leaves)
+			  std::cerr << l << " ";
+			  std::cerr << std::endl;*/
+
+			size_type fimax = x;
+			// Mark each leaf in leaves, filtering first all leaves corresponding to full rows
+			for (size_type i = 0; i < m; i++) {
+				if (fullrow[i])
+					continue;
+				for (size_type ll = cst.lb(leaves[i]); ll <= cst.rb(leaves[i]); ll++) { // cst is not a generalized suffix tree
+					color[ll] = true;
+				}
+			}
+
+			// Process each set of contiguous leaves
+			for (size_type i = 0; i < m; i++) {
+				node_t const l = leaves[i];
+				if (fullrow[i])
+					continue;
+				if (cst.lb(l) == 0 || color[cst.lb(l) - 1] == false) {
+					// if leftmost leaf does not correspond to row i, skip
+					if (concatenated_rows_rs.rank(cst.sn(cst.select_leaf(cst.lb(l) + 1))) != i)
+						break;
+					size_type lb = cst.lb(l);
+					size_type rb = cst.rb(l);
+					while (rb < cst.size(cst.root()) - 1 && color[cst.rb(cst.select_leaf(rb)) + 2]) {
+						rb = rb + 1;
+					}
+
+					// Find the exclusive ancestors
+					node_t w = l;
+					while (cst.rb(w) <= rb) {
+						node_t parent = cst.parent(w);
+						if (lb <= cst.lb(parent) && cst.rb(parent) <= rb) {
+							// parent is a correct replacement
+							w = parent;
+						} else {
+							// parent fails so w is an exclusive ancestor
+							for (size_type ll = cst.lb(w); ll <= cst.rb(w); ll++) {
+								// get row
+								size_type ii = leavesmap[ll];
+								assert(leavesmap.count(ll) > 0);
+								size_type g = cst.depth(cst.parent(w)) + 1;
+								size_type gg = indexedrows_rs[ii].rank(x) + g;
+								size_type fi;
+								if (gg > indexedrows_rs[ii].rank(n)) {
+									fi = indexedrows_ss[ii].select(indexedrows_rs[ii].rank(n));
+									// fi can be less than x here but it's still correct
+								} else {
+									fi = indexedrows_ss[ii].select(indexedrows_rs[ii].rank(x) + g);
+								}
+								// filter for first occurrence of ignore char
+								if (ignorechars.length() > 0 && rowsignore_rs[ii].rank(x) != rowsignore_rs[ii].rank(n))
+									fi = std::min(rowsignore_ss[ii].select(rowsignore_rs[ii].rank(x) + 1), fi);
+								if (fi > fimax)
+									fimax = fi;
+							}
+							if (cst.rb(w) == cst.size(cst.root()) - 1)
+								break;
+							w = cst.select_leaf(cst.rb(w) + 2);
+						}
+					}
+				}
+			}
+			f[x] = fimax;
+
+			for (size_type i = 0; i < m; i++) {
+				for (size_type ll = cst.lb(leaves[i]); ll <= cst.rb(leaves[i]); ll++) { // cst is not a generalized suffix tree
+					color[ll] = false;
+				}
+				if (MSA[i][x] != '-') {
+					leavesmap.erase(cst.lb(leaves[i]));
+					leaves[i] = cst.sl(leaves[i]);
+					leavesmap[cst.lb(leaves[i])] = i;
+					fullrow[i] = false;
+				}
+			}
+		}
+	}
+
 	void segment_elastic_minmaxlength(
 			std::vector<std::string> const &MSA,
 			cst_type const &cst,
 			std::string &ignorechars,
 			std::vector<size_type> &out_indices
+			) {
+		size_type const n = MSA[0].size();
+		size_type const m = MSA.size();
+		size_type nongap = 0;
+		size_type toignore = 0;
+		for (size_type i = 0; i < m; i++) { // TODO: MSA struct
+			for (size_type j = 0; j < n; j++) {
+				if (MSA[i][j] != '-')
+					nongap += 1;
+				if (ignorechars.find(MSA[i][j]) != std::string::npos)
+					toignore += 1;
+			}
+		}
+
+		std::cerr << "MSA contains " << (n*m) - nongap  << " gaps.\n" << std::flush;
+		std::cerr << "MSA contains " << toignore  << " characters to ignore for the semi-repeat-free property.\n" << std::flush;
+
+		// Preprocess the MSA rows for rank, select queries
+		std::vector<sdsl::bit_vector> indexedrows(m, sdsl::bit_vector(n, 1));
+		std::vector<sdsl::bit_vector> rowsignore(m, sdsl::bit_vector(n, 0)); // ignore chars
+		for (size_type i = 0; i < m; i++) {
+			for (size_type j = 0; j < n; j++) {
+				if (MSA[i][j] == '-')
+					indexedrows[i][j] = 0;
+				if (ignorechars.find(MSA[i][j]) != std::string::npos)
+					rowsignore[i][j] = 1;
+			}
+		}
+
+		// rank support on the rows
+		std::vector<sdsl::rank_support_v5<>> indexedrows_rs;
+		indexedrows_rs.resize(m);
+		for (size_type i = 0; i < m; i++) {
+			sdsl::rank_support_v5<> rs(&indexedrows[i]);
+			indexedrows_rs[i] = rs;
+		}
+
+		// select support on the rows
+		std::vector<sdsl::select_support_mcl<>> indexedrows_ss;
+		indexedrows_ss.resize(m);
+		for (size_type i = 0; i < m; i++) {
+			sdsl::select_support_mcl<> ss(&indexedrows[i]);
+			indexedrows_ss[i] = ss;
+		}
+
+		// rank, select on ignore chars
+		std::vector<sdsl::rank_support_v5<>> rowsignore_rs;
+		if (ignorechars.length() > 0) {
+			rowsignore_rs.resize(m);
+			for (size_type i = 0; i < m; i++) {
+				sdsl::rank_support_v5<> rs(&rowsignore[i]);
+				rowsignore_rs[i] = rs;
+			}
+		}
+		std::vector<sdsl::select_support_mcl<>> rowsignore_ss;
+		if (ignorechars.length() > 0) {
+			rowsignore_ss.resize(m);
+			for (size_type i = 0; i < m; i++) {
+				sdsl::select_support_mcl<> ss(&rowsignore[i]);
+				rowsignore_ss[i] = ss;
+			}
+		}
+
+		// bitvector + rank and select support for finding corresponding row
+		sdsl::bit_vector concatenated_rows(nongap + m, 0);
+		size_type k = 0;
+		for (size_type i = 0; i < m; i++) { // TODO: MSA struct
+			for (size_type j = 0; j < n; j++) {
+				if (MSA[i][j] != '-')
+					k += 1;
+			}
+			concatenated_rows[k++] = 1;
+		}
+		sdsl::rank_support_v5<> concatenated_rows_rs(&concatenated_rows);
+
+		/* This is a preprocessing part of the main algorithm */
+
+		/* f[x] is minimum index greater or equal to x such that MSA[0..m-1][x..f[x]] is a semi-repeat-free segment */
+		std::vector<size_type> f(n, 0);
+		compute_f(m, n, std::ref(f), std::ref(MSA), std::ref(cst), std::ref(ignorechars), std::ref(rowsignore_rs), std::ref(rowsignore_ss), std::ref(concatenated_rows_rs), std::ref(indexedrows_rs), std::ref(indexedrows_ss));
+
+		// there is always a valid segmentation
+		/*if (f[0] == n) {
+			std::cerr << "No valid segmentation found!\n";
+			return ;
+		}*/
+		/*std::cerr << "f : ";
+		for (auto v : f)
+			std::cerr << v << " ";
+		std::cerr << std::endl;*/
+
+		// Sort the resulting pairs (x,f(x)), make f(x) 1-indexed
+		std::vector<std::pair<size_type,size_type>> minimal_right_extensions;
+		minimal_right_extensions.resize(n);
+		for (size_type x = 0; x < n; x++) {
+			std::pair<size_type,size_type> p(x, f[x]+1);
+			minimal_right_extensions[x] = p;
+		}
+		// TODO: choose sorting algorithm
+		struct Local {
+			static bool pair_comparator(std::pair<size_type,size_type> a, std::pair<size_type,size_type> b) {
+				return (std::get<1>(a) < std::get<1>(b));
+			}
+		};
+		std::sort(minimal_right_extensions.begin(), minimal_right_extensions.end(), Local::pair_comparator);
+
+
+		// END OF PREPROCESSING
+
+		std::cerr << "Computing optimal segmentation..." << std::flush;
+		std::vector<size_type> count_solutions(n, 0);
+		std::vector<size_type> backtrack_count(n, 0);
+		std::vector<std::list<std::pair<size_type,size_type>>> transition_list(n + 2);
+		// NOTE: transition_list[n + 1] can be used to manage the terminator character
+		// UPDATE: this note probably is not true, this can be fixed in here
+		std::vector<size_type> minmaxlength(n + 1, 0);
+		std::vector<size_type> backtrack(n + 1, 0);
+		size_type y = 0, I = 0, S = n + 1, backtrack_S = -1;
+		for (size_type j = 1; j <= n; j++) {
+			while (j == std::get<1>(minimal_right_extensions[y])) {
+				size_type xy  = std::get<0>(minimal_right_extensions[y]);
+				size_type rec_score = minmaxlength[xy];
+				//std::cerr << "rec_score = " << rec_score << std::endl;
+				if (rec_score > n) {
+					// filter out cases when there is no recursive solution
+				} else if (j <= xy + rec_score) {
+					count_solutions[rec_score] += 1;
+					I = std::min(I, rec_score);
+					const size_type current_x = backtrack_count[rec_score];
+					if (xy + rec_score > current_x + minmaxlength[current_x]) {
+						backtrack_count[rec_score] = xy;
+					}
+					if (xy + rec_score + 1 <= n) {
+						transition_list[xy + rec_score + 1].push_back(minimal_right_extensions[y]);
+					}
+				} else {
+					if (j - xy < S) {
+						backtrack_S = xy;
+					}
+					S = std::min(S, j - xy);
+				}
+				y += 1;
+			}
+			for (auto pair : transition_list[j]) {
+				const size_type x = std::get<0>(pair);
+				count_solutions[minmaxlength[x]] -= 1;
+				if (j - x < S) {
+					S = j - x;
+					backtrack_S = x;
+				}
+				if (count_solutions[minmaxlength[x]] == 0) {
+					backtrack_count[minmaxlength[x]] = 0;
+				}
+			}
+			if (count_solutions[I] > 0 && I < S) { //TODO: what if I == S? should we pick the smallest backtrack?
+				minmaxlength[j] = I;
+				backtrack[j] = backtrack_count[I];
+			} else {
+				minmaxlength[j] = S;
+				backtrack[j] = backtrack_S;
+			}
+			S += 1;
+			if (count_solutions[I] == 0)
+				I += 1;
+		}
+		/*std::cerr << "minmaxlength: ";
+		  for (auto v : minmaxlength)
+		  std::cerr << v << " ";
+		  std::cerr << std::endl;
+		  std::cerr << "backtrack: ";
+		  for (auto v : backtrack)
+		  std::cerr << v << " ";
+		  std::cerr << std::endl;*/
+		std::cerr << "done (optimal segment length = " << minmaxlength[n] << ")." << std::endl << std::flush;
+
+		// NB: added block info
+		std::list<size_type> boundariestemp;
+		size_type j = n;
+		boundariestemp.push_front(j);
+		while (backtrack[j]!=0) {
+			//std::cerr << j << " ";
+			boundariestemp.push_front(backtrack[j]-1);
+			j = backtrack[j];
+		}
+
+		std::vector<size_type> boundaries;
+		for (const auto& j : boundariestemp)
+			boundaries.push_back(j);
+
+		std::swap(boundaries, out_indices);
+	}
+
+	void segment_elastic_minmaxlength_multithread(
+			std::vector<std::string> const &MSA,
+			cst_type const &cst,
+			std::string &ignorechars,
+			std::vector<size_type> &out_indices,
+			int max_threads
 			) {
 		size_type const n = MSA[0].size();
 		size_type const m = MSA.size();
@@ -862,93 +1279,22 @@ namespace {
 			leavesmap[cst.lb(leaves[i])] = i;
 			next += indexedrows_rs[i].rank(n) + 1;
 		}
-		sdsl::bit_vector fullrow(m, true); // mark if leaves[i] is still the initial value
 
 		/* binary coloring of the leaves */
 		sdsl::bit_vector color(cst.size(cst.root()), false);
 
 		/* f[x] is minimum index greater or equal to x such that MSA[0..m-1][x..f[x]] is a semi-repeat-free segment */
 		std::vector<size_type> f(n, 0);
-		for (size_type x = 0; x < n; x++) {
-			/*std::cerr << "Computing f[x], with x = " << x << std::endl << std::flush;
-
-			  std::cerr << "leaves for f[" << x << "] are: ";
-			  for (auto l : leaves)
-			  std::cerr << l << " ";
-			  std::cerr << std::endl;*/
-
-			size_type fimax = x;
-			// Mark each leaf in leaves, filtering first all leaves corresponding to full rows
-			for (size_type i = 0; i < m; i++) {
-				if (fullrow[i])
-					continue;
-				for (size_type ll = cst.lb(leaves[i]); ll <= cst.rb(leaves[i]); ll++) { // cst is not a generalized suffix tree
-					color[ll] = true;
-				}
+		for (size_type x = 0; x < n;) {
+			std::vector<std::thread> t;
+			for (int i = 0; i < max_threads && x < n; i++) {
+				//std::cerr << "Calling compute_f_range for range" << x << " to " << std::min(x + n/max_threads, n-1) << std::endl << std::flush;
+				t.push_back(std::thread(compute_f_range, m, n, x, std::min(x + n/max_threads, n-1), std::ref(f), std::ref(MSA), std::ref(cst), std::ref(ignorechars), std::ref(rowsignore_rs), std::ref(rowsignore_ss), std::ref(concatenated_rows_rs), std::ref(indexedrows_rs), std::ref(indexedrows_ss)));
+				x = std::min(x + n/max_threads, n-1) + 1;
 			}
-
-			// Process each set of contiguous leaves
-			for (size_type i = 0; i < m; i++) {
-				node_t const l = leaves[i];
-				if (fullrow[i])
-					continue;
-				if (cst.lb(l) == 0 || color[cst.lb(l) - 1] == false) {
-					// if leftmost leaf does not correspond to row i, skip
-					if (concatenated_rows_rs.rank(cst.sn(cst.select_leaf(cst.lb(l) + 1))) != i)
-						break;
-					size_type lb = cst.lb(l);
-					size_type rb = cst.rb(l);
-					while (rb < cst.size(cst.root()) - 1 && color[cst.rb(cst.select_leaf(rb)) + 2]) {
-						rb = rb + 1;
-					}
-
-					// Find the exclusive ancestors
-					node_t w = l;
-					while (cst.rb(w) <= rb) {
-						node_t parent = cst.parent(w);
-						if (lb <= cst.lb(parent) && cst.rb(parent) <= rb) {
-							// parent is a correct replacement
-							w = parent;
-						} else {
-							// parent fails so w is an exclusive ancestor
-							for (size_type ll = cst.lb(w); ll <= cst.rb(w); ll++) {
-								// get row
-								size_type ii = leavesmap[ll];
-								assert(leavesmap.count(ll) > 0);
-								size_type g = cst.depth(cst.parent(w)) + 1;
-								size_type gg = indexedrows_rs[ii].rank(x) + g;
-								size_type fi;
-								if (gg > indexedrows_rs[ii].rank(n)) {
-									fi = indexedrows_ss[ii].select(indexedrows_rs[ii].rank(n));
-									// fi can be less than x here but it's still correct
-								} else {
-									fi = indexedrows_ss[ii].select(indexedrows_rs[ii].rank(x) + g);
-								}
-								// filter for first occurrence of ignore char
-								if (ignorechars.length() > 0 && rowsignore_rs[ii].rank(x) != rowsignore_rs[ii].rank(n))
-									fi = std::min(rowsignore_ss[ii].select(rowsignore_rs[ii].rank(x) + 1), fi);
-								if (fi > fimax)
-									fimax = fi;
-							}
-							if (cst.rb(w) == cst.size(cst.root()) - 1)
-								break;
-							w = cst.select_leaf(cst.rb(w) + 2);
-						}
-					}
-				}
-			}
-			f[x] = fimax;
-
-			for (size_type i = 0; i < m; i++) {
-				for (size_type ll = cst.lb(leaves[i]); ll <= cst.rb(leaves[i]); ll++) { // cst is not a generalized suffix tree
-					color[ll] = false;
-				}
-				if (MSA[i][x] != '-') {
-					leavesmap.erase(cst.lb(leaves[i]));
-					leaves[i] = cst.sl(leaves[i]);
-					leavesmap[cst.lb(leaves[i])] = i;
-					fullrow[i] = false;
-				}
+			for (auto &tt : t)
+			{
+				tt.join();
 			}
 		}
 
@@ -1220,7 +1566,8 @@ namespace {
 	}
 
 	void make_gfa(
-			std::vector<std::string> const &MSA,
+			int const m,
+			int const n,
 			std::vector<std::string> const &identifiers,
 			std::vector <std::string> &node_labels,
 			adjacency_list &edges,
@@ -1239,7 +1586,7 @@ namespace {
 
 		assert(edges.size() == node_labels.size());
 		// MSA info
-		dst_os << "M\t" << MSA.size() << "\t" << MSA[0].length() << std::endl;
+		dst_os << "M\t" << m << "\t" << n << std::endl;
 
 		// Segmentation info
 		dst_os << "X\t1";
@@ -1284,7 +1631,7 @@ namespace {
 		// paths
 		for (size_type i = 0; i < paths.size(); i++)
 		{
-			assert(MSA.size() == paths.size());
+			assert(m == paths.size());
 			assert(identifiers.size() == paths.size());
 			dst_os << "P\t" << identifiers[i] << "\t";
 			for (size_type j = 0; j < paths[i].size() - 1; j++) {
@@ -1367,6 +1714,8 @@ int main(int argc, char **argv)
 	}
 	const bool elastic(args_info.elastic_flag);
 	const bool output_paths(args_info.output_paths_flag);
+	const long threads(args_info.threads_arg);
+
 	if (!elastic && output_paths)
 	{
 		std::cerr << "Output of original sequences as paths without option --elastic is not implemented!\n";
@@ -1411,13 +1760,25 @@ int main(int argc, char **argv)
 	std::vector<std::vector<size_type>> paths;
 	int status = EXIT_SUCCESS;
 	if (elastic) { // semi-repeat-free efg
-		segment_elastic_minmaxlength(MSA, cst, ignorechars, block_indices);
-		make_efg(block_indices, MSA, node_labels, node_blocks, edges, output_paths, paths);
+		if (threads == -1)
+			segment_elastic_minmaxlength(MSA, cst, ignorechars, block_indices);
+		else if (threads > 0)
+			segment_elastic_minmaxlength_multithread(MSA, cst, ignorechars, block_indices, threads);
+		else {
+			std::cerr << "Invalid number of threads." << std::endl;
+			return EXIT_FAILURE;
+		}
+		sdsl::util::clear(cst);
+		make_efg(block_indices, MSA, node_labels, node_blocks, edges, output_paths, paths); // TODO: lower RAM usage for huge graphs
 	} else if (gap_limit == 1) { // no gaps
 		status = segment(MSA, cst, node_labels, edges);
 	} else {
 		status = segment2elasticValid(MSA, cst, node_labels, edges);
 	}
+
+	int m = MSA.size();
+	int n = MSA[0].length();
+	MSA.clear();
 
 	if (status == EXIT_FAILURE)
 		return EXIT_FAILURE;
@@ -1429,7 +1790,7 @@ int main(int argc, char **argv)
 			make_index(node_labels, edges, args_info.output_arg, args_info.memory_chart_output_arg);
 		} else {
 			std::cerr << "Writing the xGFA to disk…\n";
-			make_gfa(MSA, identifiers, node_labels, edges, node_blocks, block_indices, output_paths, paths, args_info.output_arg, args_info.memory_chart_output_arg);
+			make_gfa(m, n, identifiers, node_labels, edges, node_blocks, block_indices, output_paths, paths, args_info.output_arg, args_info.memory_chart_output_arg);
 		}
 	}
 	if (elastic)
@@ -1439,7 +1800,7 @@ int main(int argc, char **argv)
 			make_index(node_labels, edges, args_info.output_arg, args_info.memory_chart_output_arg);
 		} else {
 			std::cerr << "Writing the xGFA to disk…\n";
-			make_gfa(MSA, identifiers, node_labels, edges, node_blocks, block_indices, output_paths, paths, args_info.output_arg, args_info.memory_chart_output_arg);
+			make_gfa(m, n, identifiers, node_labels, edges, node_blocks, block_indices, output_paths, paths, args_info.output_arg, args_info.memory_chart_output_arg);
 		}
 	}
 

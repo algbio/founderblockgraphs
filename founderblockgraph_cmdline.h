@@ -63,6 +63,9 @@ struct gengetopt_args_info
   char * ignore_chars_arg;	/**< @brief Ignore these characters for the indexability property/pattern matching.  */
   char * ignore_chars_orig;	/**< @brief Ignore these characters for the indexability property/pattern matching original value given at command line.  */
   const char *ignore_chars_help; /**< @brief Ignore these characters for the indexability property/pattern matching help description.  */
+  long threads_arg;	/**< @brief Max # threads (default='-1').  */
+  char * threads_orig;	/**< @brief Max # threads original value given at command line.  */
+  const char *threads_help; /**< @brief Max # threads help description.  */
   
   unsigned int help_given ;	/**< @brief Whether help was given.  */
   unsigned int version_given ;	/**< @brief Whether version was given.  */
@@ -75,6 +78,7 @@ struct gengetopt_args_info
   unsigned int gfa_given ;	/**< @brief Whether gfa was given.  */
   unsigned int output_paths_given ;	/**< @brief Whether output-paths was given.  */
   unsigned int ignore_chars_given ;	/**< @brief Whether ignore-chars was given.  */
+  unsigned int threads_given ;	/**< @brief Whether threads was given.  */
 
 } ;
 

@@ -45,6 +45,7 @@ const char *gengetopt_args_info_help[] = {
   "      --gfa                     Saves output in xGFA format  (default=off)",
   "  -p, --output-paths            Print the original sequences as paths of the\n                                  xGFA graph (requires --gfa)  (default=off)",
   "      --ignore-chars=STRING     Ignore these characters for the indexability\n                                  property/pattern matching",
+  "  -t, --threads=THREADNUM       Max # threads  (default=`-1')",
     0
 };
 
@@ -83,6 +84,7 @@ void clear_given (struct gengetopt_args_info *args_info)
   args_info->gfa_given = 0 ;
   args_info->output_paths_given = 0 ;
   args_info->ignore_chars_given = 0 ;
+  args_info->threads_given = 0 ;
 }
 
 static
@@ -104,6 +106,8 @@ void clear_args (struct gengetopt_args_info *args_info)
   args_info->output_paths_flag = 0;
   args_info->ignore_chars_arg = NULL;
   args_info->ignore_chars_orig = NULL;
+  args_info->threads_arg = -1;
+  args_info->threads_orig = NULL;
   
 }
 
@@ -123,6 +127,7 @@ void init_args_info(struct gengetopt_args_info *args_info)
   args_info->gfa_help = gengetopt_args_info_help[8] ;
   args_info->output_paths_help = gengetopt_args_info_help[9] ;
   args_info->ignore_chars_help = gengetopt_args_info_help[10] ;
+  args_info->threads_help = gengetopt_args_info_help[11] ;
   
 }
 
@@ -223,6 +228,7 @@ cmdline_parser_release (struct gengetopt_args_info *args_info)
   free_string_field (&(args_info->memory_chart_output_orig));
   free_string_field (&(args_info->ignore_chars_arg));
   free_string_field (&(args_info->ignore_chars_orig));
+  free_string_field (&(args_info->threads_orig));
   
   
 
@@ -275,6 +281,8 @@ cmdline_parser_dump(FILE *outfile, struct gengetopt_args_info *args_info)
     write_into_file(outfile, "output-paths", 0, 0 );
   if (args_info->ignore_chars_given)
     write_into_file(outfile, "ignore-chars", args_info->ignore_chars_orig, 0);
+  if (args_info->threads_given)
+    write_into_file(outfile, "threads", args_info->threads_orig, 0);
   
 
   i = EXIT_SUCCESS;
@@ -580,10 +588,11 @@ cmdline_parser_internal (
         { "gfa",	0, NULL, 0 },
         { "output-paths",	0, NULL, 'p' },
         { "ignore-chars",	1, NULL, 0 },
+        { "threads",	1, NULL, 't' },
         { 0,  0, 0, 0 }
       };
 
-      c = getopt_long (argc, argv, "hVep", long_options, &option_index);
+      c = getopt_long (argc, argv, "hVept:", long_options, &option_index);
 
       if (c == -1) break;	/* Exit from `while (1)' loop.  */
 
@@ -615,6 +624,18 @@ cmdline_parser_internal (
           if (update_arg((void *)&(args_info->output_paths_flag), 0, &(args_info->output_paths_given),
               &(local_args_info.output_paths_given), optarg, 0, 0, ARG_FLAG,
               check_ambiguity, override, 1, 0, "output-paths", 'p',
+              additional_error))
+            goto failure;
+        
+          break;
+        case 't':	/* Max # threads.  */
+        
+        
+          if (update_arg( (void *)&(args_info->threads_arg), 
+               &(args_info->threads_orig), &(args_info->threads_given),
+              &(local_args_info.threads_given), optarg, 0, "-1", ARG_LONG,
+              check_ambiguity, override, 0, 0,
+              "threads", 't',
               additional_error))
             goto failure;
         

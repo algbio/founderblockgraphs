@@ -1,8 +1,8 @@
 GENGETOPT	?= gengetopt
 
-OPT_FLAGS	?= -O2
+OPT_FLAGS	?= -Ofast -march=native
 CFLAGS		+= $(OPT_FLAGS) -std=c99 -Wall
-CXXFLAGS	+= $(OPT_FLAGS) -std=c++17 -Wall
+CXXFLAGS	+= $(OPT_FLAGS) -pthread -std=c++17 -Wall
 SDSL_ROOT	= ./sdsl-lite/build
 CPPFLAGS	+= -isystem $(SDSL_ROOT)/include -isystem $(SDSL_ROOT)/external/libdivsufsort/include
 STATIC_LIBRARIES = $(SDSL_ROOT)/external/libdivsufsort/lib/libdivsufsort.a $(SDSL_ROOT)/external/libdivsufsort/lib/libdivsufsort64.a $(SDSL_ROOT)/lib/libsdsl.a
