@@ -10,6 +10,7 @@
 #include <chrono>
 #include <unordered_map>
 #include <unordered_set>
+#include <set>
 #include <vector>
 #include <thread>         // std::thread
 #include "founderblockgraph_cmdline.h"
@@ -774,6 +775,124 @@ namespace {
 		std::cerr << std::flush;
 	}
 
+	void output_efg(
+			const std::vector<size_type> &boundaries,
+			const std::vector<std::string> &MSA,
+			bool output_paths,
+			std::vector<std::string> const &identifiers,
+			char const *dst_path_c
+	) {
+		size_type const n = MSA[0].size();
+		size_type const m = MSA.size();
+		// create the output file
+		std::string const dst_path(dst_path_c);
+		std::fstream dst_os;
+		dst_os.exceptions(std::fstream::failbit);
+		dst_os.open(dst_path, std::ios_base::out);
+
+		// MSA info
+		dst_os << "M\t" << m << "\t" << n << std::endl;
+
+		// Segmentation info
+		dst_os << "X\t1";
+		for (size_type i = 0; (int)i < (int)boundaries.size() - 1; i++)
+			dst_os << "\t" << boundaries[i] + 2;
+		dst_os << std::endl;
+
+		// Partition of nodes into blocks
+		dst_os << "B\t";
+		for (size_t j = 0, previndex = 0; (int)j < (int)boundaries.size(); previndex = boundaries[j]+1, j++) {
+			std::unordered_set<std::string> labels;
+			for (size_type i=0; i<m; i++) {
+				std::string const label = remove_gaps(MSA[i].substr(previndex,boundaries[j]-previndex+1));
+				if (label != "")
+					labels.insert(label);
+			}
+			dst_os << ((j == 0) ? "" : "\t") << labels.size();
+		}
+		dst_os << std::endl;
+
+		// Output nodes and edges
+		// data structures to map node labels of a block to their ID/index
+		std::unordered_map<std::string, size_type> str2id_previous_block;
+		std::unordered_map<size_type,   size_type> row2id_previous_block;
+		std::unordered_map<std::string, size_type> str2id_current_block;
+		size_type nodecount = 0;
+		for (size_t j = 0, previndex = 0; (int)j < (int)boundaries.size(); previndex = boundaries[j]+1, j++) {
+			std::unordered_map<size_type, size_type> row2id_current_block;
+			std::set<std::pair<size_type, size_type>> edges_to_previous_block;
+
+			for (size_type i=0; i<m; i++) {
+				// node
+				std::string label = remove_gaps(MSA[i].substr(previndex,boundaries[j]-previndex+1));
+				if (label == "") // empty label
+					continue;
+
+				size_type nodeindex;
+				if (str2id_current_block.find(label) == str2id_current_block.end()) {
+					nodeindex = nodecount++;
+					dst_os << "S\t" << nodeindex << "\t" << label << std::endl;
+				} else {
+					nodeindex = str2id_current_block[label];
+				}
+				str2id_current_block[label] = nodeindex;
+				row2id_current_block[i] = nodeindex;
+
+				// compute edge
+				if (row2id_previous_block.find(i) != row2id_previous_block.end())
+					edges_to_previous_block.insert(std::pair<size_type, size_type>(row2id_previous_block[i], nodeindex));
+			}
+			// print edges
+			for (auto &p : edges_to_previous_block) {
+				dst_os << "L\t" << p.first << "\t+\t" << p.second << "\t+\t0M" << std::endl;
+			}
+
+			swap(row2id_previous_block, row2id_current_block);
+			swap(str2id_previous_block, str2id_current_block);
+			str2id_current_block.clear();
+		}
+
+		// we are done, if we do not need to output the paths
+		if (!output_paths)
+			return;
+
+		// TODO: int_vector of integers from 0 to H
+		std::vector<std::vector<size_type>> paths (m, std::vector<size_type>());
+		nodecount = 0;
+		for (size_t j = 0, previndex = 0; (int)j < (int)boundaries.size(); previndex = boundaries[j]+1, j++) {
+			std::unordered_map<std::string, size_type> str2id_current_block;
+			std::unordered_map<size_type,   size_type> row2id_current_block;
+			for (size_type i=0; i<m; i++) {
+				std::string const label = remove_gaps(MSA[i].substr(previndex,boundaries[j]-previndex+1));
+				if (label == "") // empty label
+					continue;
+
+				size_type nodeindex;
+				if (str2id_current_block.find(label) == str2id_current_block.end()) {
+					nodeindex = nodecount++;
+				} else {
+					nodeindex = str2id_current_block[label];
+				}
+				str2id_current_block[label] = nodeindex;
+				row2id_current_block[i] = nodeindex;
+			}
+			for (auto &p : row2id_current_block) {
+				paths[p.first].push_back(p.second);
+			}
+		}
+
+		// paths
+		assert(identifiers.size() == paths.size());
+		for (size_type i = 0; i < paths.size(); i++) {
+			dst_os << "P\t" << identifiers[i] << "\t";
+			for (size_type j = 0; j < paths[i].size() - 1; j++) {
+				dst_os << paths[i][j] << "+,";
+			}
+			dst_os << paths[i][paths[i].size()-1] << "+";
+			dst_os << "\t*" << std::endl;
+		}
+	}
+
 	/* 
 	 * compute_f_range accepts in input the MSA, its compressed suffix tree,
 	 * the relative sdsl data structures on its rows and a column interval
@@ -1107,6 +1226,7 @@ namespace {
 		// END OF PREPROCESSING
 
 		std::cerr << "Computing optimal segmentation..." << std::flush;
+		// TODO: swap size_type with int32 or optimal multiple of 2
 		std::vector<size_type> count_solutions(n, 0);
 		std::vector<size_type> backtrack_count(n, 0);
 		std::vector<std::list<std::pair<size_type,size_type>>> transition_list(n + 2);
@@ -1769,7 +1889,6 @@ int main(int argc, char **argv)
 			return EXIT_FAILURE;
 		}
 		sdsl::util::clear(cst);
-		make_efg(block_indices, MSA, node_labels, node_blocks, edges, output_paths, paths); // TODO: lower RAM usage for huge graphs
 	} else if (gap_limit == 1) { // no gaps
 		status = segment(MSA, cst, node_labels, edges);
 	} else {
@@ -1778,7 +1897,6 @@ int main(int argc, char **argv)
 
 	int m = MSA.size();
 	int n = MSA[0].length();
-	MSA.clear();
 
 	if (status == EXIT_FAILURE)
 		return EXIT_FAILURE;
@@ -1787,9 +1905,13 @@ int main(int argc, char **argv)
 	{
 		if (!output_gfa_format) {
 			std::cerr << "Writing the index to disk…\n";
+			make_efg(block_indices, MSA, node_labels, node_blocks, edges, output_paths, paths); // TODO: lower RAM usage for huge graphs
+			MSA.clear();
 			make_index(node_labels, edges, args_info.output_arg, args_info.memory_chart_output_arg);
 		} else {
 			std::cerr << "Writing the xGFA to disk…\n";
+			make_efg(block_indices, MSA, node_labels, node_blocks, edges, output_paths, paths); // TODO: lower RAM usage for huge graphs
+			MSA.clear();
 			make_gfa(m, n, identifiers, node_labels, edges, node_blocks, block_indices, output_paths, paths, args_info.output_arg, args_info.memory_chart_output_arg);
 		}
 	}
@@ -1797,10 +1919,12 @@ int main(int argc, char **argv)
 	{
 		if (!output_gfa_format) {
 			std::cerr << "Writing the index to disk…\n";
+			make_efg(block_indices, MSA, node_labels, node_blocks, edges, output_paths, paths); // TODO: lower RAM usage for huge graphs
+			MSA.clear();
 			make_index(node_labels, edges, args_info.output_arg, args_info.memory_chart_output_arg);
 		} else {
+			output_efg(block_indices, MSA, output_paths, identifiers, args_info.output_arg);
 			std::cerr << "Writing the xGFA to disk…\n";
-			make_gfa(m, n, identifiers, node_labels, edges, node_blocks, block_indices, output_paths, paths, args_info.output_arg, args_info.memory_chart_output_arg);
 		}
 	}
 
