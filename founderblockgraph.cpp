@@ -1856,9 +1856,9 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 	const bool output_gfa_format(args_info.gfa_flag);
-	if (!elastic && output_gfa_format)
+	if ((!elastic && output_gfa_format) || (elastic && !output_gfa_format))
 	{
-		std::cerr << "xGFA output without option --elastic not yet implemented!\n";
+		std::cerr << "--elastic and --gfa options are currently only supported when both are used!\n";
 		return EXIT_FAILURE;
 	}
 
