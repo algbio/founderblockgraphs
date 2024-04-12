@@ -38,6 +38,7 @@ extern "C" {
 struct gengetopt_args_info
 {
   const char *help_help; /**< @brief Print help and exit help description.  */
+  const char *full_help_help; /**< @brief Print help, including hidden options, and exit help description.  */
   const char *version_help; /**< @brief Print version and exit help description.  */
   char * input_arg;	/**< @brief MSA input path.  */
   char * input_orig;	/**< @brief MSA input path original value given at command line.  */
@@ -66,8 +67,11 @@ struct gengetopt_args_info
   long threads_arg;	/**< @brief Max # threads (default='-1').  */
   char * threads_orig;	/**< @brief Max # threads original value given at command line.  */
   const char *threads_help; /**< @brief Max # threads help description.  */
+  int disable_elastic_tricks_flag;	/**< @brief Disable the tricks considering the start and end of sequences as unique (default=off).  */
+  const char *disable_elastic_tricks_help; /**< @brief Disable the tricks considering the start and end of sequences as unique help description.  */
   
   unsigned int help_given ;	/**< @brief Whether help was given.  */
+  unsigned int full_help_given ;	/**< @brief Whether full-help was given.  */
   unsigned int version_given ;	/**< @brief Whether version was given.  */
   unsigned int input_given ;	/**< @brief Whether input was given.  */
   unsigned int output_given ;	/**< @brief Whether output was given.  */
@@ -79,6 +83,7 @@ struct gengetopt_args_info
   unsigned int output_paths_given ;	/**< @brief Whether output-paths was given.  */
   unsigned int ignore_chars_given ;	/**< @brief Whether ignore-chars was given.  */
   unsigned int threads_given ;	/**< @brief Whether threads was given.  */
+  unsigned int disable_elastic_tricks_given ;	/**< @brief Whether disable-elastic-tricks was given.  */
 
 } ;
 
@@ -100,6 +105,8 @@ extern const char *gengetopt_args_info_usage;
 extern const char *gengetopt_args_info_description;
 /** @brief all the lines making the help output */
 extern const char *gengetopt_args_info_help[];
+/** @brief all the lines making the full help output (including hidden options) */
+extern const char *gengetopt_args_info_full_help[];
 
 /**
  * The command line parser
@@ -161,6 +168,10 @@ int cmdline_parser_file_save(const char *filename,
  * Print the help
  */
 void cmdline_parser_print_help(void);
+/**
+ * Print the full help (including hidden options)
+ */
+void cmdline_parser_print_full_help(void);
 /**
  * Print the version
  */

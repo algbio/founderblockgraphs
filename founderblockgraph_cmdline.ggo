@@ -33,3 +33,4 @@ option	"gfa"		-	"Saves output in xGFA format"	flag	off
 option	"output-paths"	p	"Print the original sequences as paths of the xGFA graph (requires --gfa)"	flag	off
 option	"ignore-chars"	-	"Ignore these characters for the indexability property/pattern matching"	string	optional
 option	"threads"				t	"Max # threads"					long	typestr = "THREADNUM"	default = "-1"	optional
+option	"disable-elastic-tricks"	-	"Disable the tricks considering the start and end of sequences as unique"	flag	off	hidden

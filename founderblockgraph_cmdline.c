@@ -33,8 +33,9 @@ const char *gengetopt_args_info_versiontext = "";
 
 const char *gengetopt_args_info_description = "Input is MSA given in fasta format. In standard mode (without --elastic), rows\nwith runs of gaps ‘-’ or N’s ≥ GAPLIMIT will be filtered out.";
 
-const char *gengetopt_args_info_help[] = {
+const char *gengetopt_args_info_full_help[] = {
   "  -h, --help                    Print help and exit",
+  "      --full-help               Print help, including hidden options, and exit",
   "  -V, --version                 Print version and exit",
   "      --input=filename          MSA input path",
   "      --output=filename         Index/EFG output path",
@@ -46,8 +47,31 @@ const char *gengetopt_args_info_help[] = {
   "  -p, --output-paths            Print the original sequences as paths of the\n                                  xGFA graph (requires --gfa)  (default=off)",
   "      --ignore-chars=STRING     Ignore these characters for the indexability\n                                  property/pattern matching",
   "  -t, --threads=THREADNUM       Max # threads  (default=`-1')",
+  "      --disable-elastic-tricks  Disable the tricks considering the start and\n                                  end of sequences as unique  (default=off)",
     0
 };
+
+static void
+init_help_array(void)
+{
+  gengetopt_args_info_help[0] = gengetopt_args_info_full_help[0];
+  gengetopt_args_info_help[1] = gengetopt_args_info_full_help[1];
+  gengetopt_args_info_help[2] = gengetopt_args_info_full_help[2];
+  gengetopt_args_info_help[3] = gengetopt_args_info_full_help[3];
+  gengetopt_args_info_help[4] = gengetopt_args_info_full_help[4];
+  gengetopt_args_info_help[5] = gengetopt_args_info_full_help[5];
+  gengetopt_args_info_help[6] = gengetopt_args_info_full_help[6];
+  gengetopt_args_info_help[7] = gengetopt_args_info_full_help[7];
+  gengetopt_args_info_help[8] = gengetopt_args_info_full_help[8];
+  gengetopt_args_info_help[9] = gengetopt_args_info_full_help[9];
+  gengetopt_args_info_help[10] = gengetopt_args_info_full_help[10];
+  gengetopt_args_info_help[11] = gengetopt_args_info_full_help[11];
+  gengetopt_args_info_help[12] = gengetopt_args_info_full_help[12];
+  gengetopt_args_info_help[13] = 0; 
+  
+}
+
+const char *gengetopt_args_info_help[14];
 
 typedef enum {ARG_NO
   , ARG_FLAG
@@ -74,6 +98,7 @@ static
 void clear_given (struct gengetopt_args_info *args_info)
 {
   args_info->help_given = 0 ;
+  args_info->full_help_given = 0 ;
   args_info->version_given = 0 ;
   args_info->input_given = 0 ;
   args_info->output_given = 0 ;
@@ -85,6 +110,7 @@ void clear_given (struct gengetopt_args_info *args_info)
   args_info->output_paths_given = 0 ;
   args_info->ignore_chars_given = 0 ;
   args_info->threads_given = 0 ;
+  args_info->disable_elastic_tricks_given = 0 ;
 }
 
 static
@@ -108,6 +134,7 @@ void clear_args (struct gengetopt_args_info *args_info)
   args_info->ignore_chars_orig = NULL;
   args_info->threads_arg = -1;
   args_info->threads_orig = NULL;
+  args_info->disable_elastic_tricks_flag = 0;
   
 }
 
@@ -115,19 +142,21 @@ static
 void init_args_info(struct gengetopt_args_info *args_info)
 {
 
-
-  args_info->help_help = gengetopt_args_info_help[0] ;
-  args_info->version_help = gengetopt_args_info_help[1] ;
-  args_info->input_help = gengetopt_args_info_help[2] ;
-  args_info->output_help = gengetopt_args_info_help[3] ;
-  args_info->gap_limit_help = gengetopt_args_info_help[4] ;
-  args_info->graphviz_output_help = gengetopt_args_info_help[5] ;
-  args_info->memory_chart_output_help = gengetopt_args_info_help[6] ;
-  args_info->elastic_help = gengetopt_args_info_help[7] ;
-  args_info->gfa_help = gengetopt_args_info_help[8] ;
-  args_info->output_paths_help = gengetopt_args_info_help[9] ;
-  args_info->ignore_chars_help = gengetopt_args_info_help[10] ;
-  args_info->threads_help = gengetopt_args_info_help[11] ;
+  init_help_array(); 
+  args_info->help_help = gengetopt_args_info_full_help[0] ;
+  args_info->full_help_help = gengetopt_args_info_full_help[1] ;
+  args_info->version_help = gengetopt_args_info_full_help[2] ;
+  args_info->input_help = gengetopt_args_info_full_help[3] ;
+  args_info->output_help = gengetopt_args_info_full_help[4] ;
+  args_info->gap_limit_help = gengetopt_args_info_full_help[5] ;
+  args_info->graphviz_output_help = gengetopt_args_info_full_help[6] ;
+  args_info->memory_chart_output_help = gengetopt_args_info_full_help[7] ;
+  args_info->elastic_help = gengetopt_args_info_full_help[8] ;
+  args_info->gfa_help = gengetopt_args_info_full_help[9] ;
+  args_info->output_paths_help = gengetopt_args_info_full_help[10] ;
+  args_info->ignore_chars_help = gengetopt_args_info_full_help[11] ;
+  args_info->threads_help = gengetopt_args_info_full_help[12] ;
+  args_info->disable_elastic_tricks_help = gengetopt_args_info_full_help[13] ;
   
 }
 
@@ -170,6 +199,15 @@ cmdline_parser_print_help (void)
   print_help_common();
   while (gengetopt_args_info_help[i])
     printf("%s\n", gengetopt_args_info_help[i++]);
+}
+
+void
+cmdline_parser_print_full_help (void)
+{
+  int i = 0;
+  print_help_common();
+  while (gengetopt_args_info_full_help[i])
+    printf("%s\n", gengetopt_args_info_full_help[i++]);
 }
 
 void
@@ -261,6 +299,8 @@ cmdline_parser_dump(FILE *outfile, struct gengetopt_args_info *args_info)
 
   if (args_info->help_given)
     write_into_file(outfile, "help", 0, 0 );
+  if (args_info->full_help_given)
+    write_into_file(outfile, "full-help", 0, 0 );
   if (args_info->version_given)
     write_into_file(outfile, "version", 0, 0 );
   if (args_info->input_given)
@@ -283,6 +323,8 @@ cmdline_parser_dump(FILE *outfile, struct gengetopt_args_info *args_info)
     write_into_file(outfile, "ignore-chars", args_info->ignore_chars_orig, 0);
   if (args_info->threads_given)
     write_into_file(outfile, "threads", args_info->threads_orig, 0);
+  if (args_info->disable_elastic_tricks_given)
+    write_into_file(outfile, "disable-elastic-tricks", 0, 0 );
   
 
   i = EXIT_SUCCESS;
@@ -578,6 +620,7 @@ cmdline_parser_internal (
 
       static struct option long_options[] = {
         { "help",	0, NULL, 'h' },
+        { "full-help",	0, NULL, 0 },
         { "version",	0, NULL, 'V' },
         { "input",	1, NULL, 0 },
         { "output",	1, NULL, 0 },
@@ -589,6 +632,7 @@ cmdline_parser_internal (
         { "output-paths",	0, NULL, 'p' },
         { "ignore-chars",	1, NULL, 0 },
         { "threads",	1, NULL, 't' },
+        { "disable-elastic-tricks",	0, NULL, 0 },
         { 0,  0, 0, 0 }
       };
 
@@ -642,6 +686,12 @@ cmdline_parser_internal (
           break;
 
         case 0:	/* Long option with no short option */
+          if (strcmp (long_options[option_index].name, "full-help") == 0) {
+            cmdline_parser_print_full_help ();
+            cmdline_parser_free (&local_args_info);
+            exit (EXIT_SUCCESS);
+          }
+
           /* MSA input path.  */
           if (strcmp (long_options[option_index].name, "input") == 0)
           {
@@ -734,6 +784,18 @@ cmdline_parser_internal (
                 &(local_args_info.ignore_chars_given), optarg, 0, 0, ARG_STRING,
                 check_ambiguity, override, 0, 0,
                 "ignore-chars", '-',
+                additional_error))
+              goto failure;
+          
+          }
+          /* Disable the tricks considering the start and end of sequences as unique.  */
+          else if (strcmp (long_options[option_index].name, "disable-elastic-tricks") == 0)
+          {
+          
+          
+            if (update_arg((void *)&(args_info->disable_elastic_tricks_flag), 0, &(args_info->disable_elastic_tricks_given),
+                &(local_args_info.disable_elastic_tricks_given), optarg, 0, 0, ARG_FLAG,
+                check_ambiguity, override, 1, 0, "disable-elastic-tricks", '-',
                 additional_error))
               goto failure;
           

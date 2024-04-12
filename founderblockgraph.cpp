@@ -916,7 +916,8 @@ namespace {
 			std::vector<sdsl::select_support_mcl<>> const &rowsignore_ss,
 			sdsl::rank_support_v5<> const &concatenated_rows_rs,
 			std::vector<sdsl::rank_support_v5<>> const &indexedrows_rs,
-			std::vector<sdsl::select_support_mcl<>> const &indexedrows_ss
+			std::vector<sdsl::select_support_mcl<>> const &indexedrows_ss,
+			const bool disable_efg_tricks
 			) {
 		// find leaves corresponding to suffixes starting at col x+1
 		std::vector<node_t> leaves(m, cst.root());
@@ -943,7 +944,7 @@ namespace {
 			// Process each set of contiguous leaves
 			for (size_type i = 0; i < m; i++) {
 				node_t const l = leaves[i];
-				if (indexedrows_rs[i].rank(x) == 0)
+				if (!disable_efg_tricks && indexedrows_rs[i].rank(x) == 0)
 					continue;
 				if (cst.lb(l) == 0 || leavesmap.find(cst.lb(l) - 1) == leavesmap.end()) {
 					// if leftmost leaf does not correspond to row i, skip
@@ -972,10 +973,14 @@ namespace {
 								size_type gg = indexedrows_rs[ii].rank(x) + g;
 								size_type fi;
 								if (gg > indexedrows_rs[ii].rank(n)) {
-									fi = indexedrows_ss[ii].select(indexedrows_rs[ii].rank(n));
+									if (!disable_efg_tricks)
+										fi = indexedrows_ss[ii].select(indexedrows_rs[ii].rank(n));
+										// fi can be less than x here but it's still correct
+									else
+										fi = n;
 									// fi can be less than x here but it's still correct
 								} else {
-									fi = indexedrows_ss[ii].select(indexedrows_rs[ii].rank(x) + g);
+									fi = indexedrows_ss[ii].select(gg);
 								}
 								// filter for first occurrence of ignore char
 								if (ignorechars.length() > 0 && rowsignore_rs[ii].rank(x) != rowsignore_rs[ii].rank(n))
@@ -1013,7 +1018,8 @@ namespace {
 			std::vector<sdsl::select_support_mcl<>> const &rowsignore_ss,
 			sdsl::rank_support_v5<> const &concatenated_rows_rs,
 			std::vector<sdsl::rank_support_v5<>> const &indexedrows_rs,
-			std::vector<sdsl::select_support_mcl<>> const &indexedrows_ss
+			std::vector<sdsl::select_support_mcl<>> const &indexedrows_ss,
+			const bool disable_efg_tricks = false
 			) {
 		/* Find the nodes corresponding to reading each whole row */
 		std::vector<node_t> leaves(m, cst.root());
@@ -1026,7 +1032,12 @@ namespace {
 
 		/* binary coloring of the leaves */
 		sdsl::bit_vector color(cst.size(cst.root()), false);
-		sdsl::bit_vector fullrow(m, true); // mark if leaves[i] is still the initial value
+		sdsl::bit_vector fullrow;
+		if (disable_efg_tricks)
+			fullrow = sdsl::bit_vector(m, false); // mark if leaves[i] is still the initial value
+		else
+			fullrow = sdsl::bit_vector(m, true); // mark if leaves[i] is still the initial value
+
 		for (size_type x = 0; x < n; x++) {
 			/*std::cerr << "Computing f[x], with x = " << x << std::endl << std::flush;
 
@@ -1077,10 +1088,13 @@ namespace {
 								size_type gg = indexedrows_rs[ii].rank(x) + g;
 								size_type fi;
 								if (gg > indexedrows_rs[ii].rank(n)) {
-									fi = indexedrows_ss[ii].select(indexedrows_rs[ii].rank(n));
-									// fi can be less than x here but it's still correct
+									if (!disable_efg_tricks)
+										fi = indexedrows_ss[ii].select(indexedrows_rs[ii].rank(n));
+										// fi can be less than x here but it's still correct
+									else
+										fi = n;
 								} else {
-									fi = indexedrows_ss[ii].select(indexedrows_rs[ii].rank(x) + g);
+									fi = indexedrows_ss[ii].select(gg);
 								}
 								// filter for first occurrence of ignore char
 								if (ignorechars.length() > 0 && rowsignore_rs[ii].rank(x) != rowsignore_rs[ii].rank(n))
@@ -1115,7 +1129,8 @@ namespace {
 			std::vector<std::string> const &MSA,
 			cst_type const &cst,
 			std::string &ignorechars,
-			std::vector<size_type> &out_indices
+			std::vector<size_type> &out_indices,
+			const bool disable_efg_tricks = false
 			) {
 		size_type const n = MSA[0].size();
 		size_type const m = MSA.size();
@@ -1195,17 +1210,15 @@ namespace {
 
 		/* f[x] is minimum index greater or equal to x such that MSA[0..m-1][x..f[x]] is a semi-repeat-free segment */
 		std::vector<size_type> f(n, 0);
-		compute_f(m, n, std::ref(f), std::ref(MSA), std::ref(cst), std::ref(ignorechars), std::ref(rowsignore_rs), std::ref(rowsignore_ss), std::ref(concatenated_rows_rs), std::ref(indexedrows_rs), std::ref(indexedrows_ss));
+		compute_f(m, n, std::ref(f), std::ref(MSA), std::ref(cst), std::ref(ignorechars), std::ref(rowsignore_rs), std::ref(rowsignore_ss), std::ref(concatenated_rows_rs), std::ref(indexedrows_rs), std::ref(indexedrows_ss), disable_efg_tricks);
 
-		// there is always a valid segmentation
-		/*if (f[0] == n) {
-			std::cerr << "No valid segmentation found!\n";
-			return ;
-		}*/
-		/*std::cerr << "f : ";
-		for (auto v : f)
-			std::cerr << v << " ";
-		std::cerr << std::endl;*/
+		if (disable_efg_tricks) {
+			if (f[0] == n) {
+				std::cerr << "No valid segmentation found!\n";
+				exit(1);
+			}
+		}
+		// else there is always a valid segmentation
 
 		// Sort the resulting pairs (x,f(x)), make f(x) 1-indexed
 		std::vector<std::pair<size_type,size_type>> minimal_right_extensions;
@@ -1314,7 +1327,8 @@ namespace {
 			cst_type const &cst,
 			std::string &ignorechars,
 			std::vector<size_type> &out_indices,
-			int max_threads
+			int max_threads,
+			const bool disable_efg_tricks = false
 			) {
 		size_type const n = MSA[0].size();
 		size_type const m = MSA.size();
@@ -1409,7 +1423,7 @@ namespace {
 			std::vector<std::thread> t;
 			for (int i = 0; i < max_threads && x < n; i++) {
 				//std::cerr << "Calling compute_f_range for range" << x << " to " << std::min(x + n/max_threads, n-1) << std::endl << std::flush;
-				t.push_back(std::thread(compute_f_range, m, n, x, std::min(x + n/max_threads, n-1), std::ref(f), std::ref(MSA), std::ref(cst), std::ref(ignorechars), std::ref(rowsignore_rs), std::ref(rowsignore_ss), std::ref(concatenated_rows_rs), std::ref(indexedrows_rs), std::ref(indexedrows_ss)));
+				t.push_back(std::thread(compute_f_range, m, n, x, std::min(x + n/max_threads, n-1), std::ref(f), std::ref(MSA), std::ref(cst), std::ref(ignorechars), std::ref(rowsignore_rs), std::ref(rowsignore_ss), std::ref(concatenated_rows_rs), std::ref(indexedrows_rs), std::ref(indexedrows_ss), disable_efg_tricks));
 				x = std::min(x + n/max_threads, n-1) + 1;
 			}
 			for (auto &tt : t)
@@ -1418,15 +1432,13 @@ namespace {
 			}
 		}
 
-		// there is always a valid segmentation
-		/*if (f[0] == n) {
-			std::cerr << "No valid segmentation found!\n";
-			return ;
-		}*/
-		/*std::cerr << "f : ";
-		for (auto v : f)
-			std::cerr << v << " ";
-		std::cerr << std::endl;*/
+		if (disable_efg_tricks) {
+			if (f[0] == n) {
+				std::cerr << "No valid segmentation found!\n";
+				exit(1);
+			}
+		}
+		// else there is always a valid segmentation
 
 		// Sort the resulting pairs (x,f(x)), make f(x) 1-indexed
 		std::vector<std::pair<size_type,size_type>> minimal_right_extensions;
@@ -1636,8 +1648,9 @@ namespace {
 						std::cerr << "Previously assigned: " << labels_e[rhs] << '\n';
 				}
 
-				if (should_stop)
-					std::abort();
+				// SIKE
+				//if (should_stop)
+				//	std::abort();
 			}
 
 			if (SHOULD_STORE_ASSIGNED_NODE_LABELS)
@@ -1835,6 +1848,7 @@ int main(int argc, char **argv)
 	const bool elastic(args_info.elastic_flag);
 	const bool output_paths(args_info.output_paths_flag);
 	const long threads(args_info.threads_arg);
+	const bool disable_efg_tricks(args_info.disable_elastic_tricks_flag);
 
 	if (!elastic && output_paths)
 	{
@@ -1881,9 +1895,9 @@ int main(int argc, char **argv)
 	int status = EXIT_SUCCESS;
 	if (elastic) { // semi-repeat-free efg
 		if (threads == -1)
-			segment_elastic_minmaxlength(MSA, cst, ignorechars, block_indices);
+			segment_elastic_minmaxlength(MSA, cst, ignorechars, block_indices, disable_efg_tricks);
 		else if (threads > 0)
-			segment_elastic_minmaxlength_multithread(MSA, cst, ignorechars, block_indices, threads);
+			segment_elastic_minmaxlength_multithread(MSA, cst, ignorechars, block_indices, threads, disable_efg_tricks);
 		else {
 			std::cerr << "Invalid number of threads." << std::endl;
 			return EXIT_FAILURE;
