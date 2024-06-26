@@ -16,7 +16,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
 package		"founderblockgraphs"
-version		"0.4"
+version		"0.5"
 purpose		"Constructs a semi-repeat-free (Elastic) Founder Graph"
 usage		"founderblockgraph --input=MSA.fasta --output={MSA.index|efg.xgfa} [--gfa] [--elastic] [--gap-limit=GAPLIMIT] [--threads=THREADNUM] [--graphviz-output=efg.dot] [--output-paths] [--ignore-chars=\"ALPHABET\"]"
 description	"Input is MSA given in fasta format. In standard mode (without --elastic), rows with runs of gaps ‘-’ or N’s ≥ GAPLIMIT will be filtered out."
@@ -33,4 +33,5 @@ option	"gfa"		-	"Saves output in xGFA format"	flag	off
 option	"output-paths"	p	"Print the original sequences as paths of the xGFA graph (requires --gfa)"	flag	off
 option	"ignore-chars"	-	"Ignore these characters for the indexability property/pattern matching"	string	optional
 option	"threads"				t	"Max # threads"					long	typestr = "THREADNUM"	default = "-1"	optional
+option	"heuristic-subset"	-	"Compute optimal segmentation based on the first ROWNUM MSA rows for performance reasons, then fix the resulting graph iteratively"	long typestr = "ROWNUM"	default = "-1"	optional	hidden
 option	"disable-elastic-tricks"	-	"Disable the tricks considering the start and end of sequences as unique"	flag	off	hidden

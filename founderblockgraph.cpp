@@ -28,6 +28,8 @@
 
 /* Copyright (C) 2020 Veli Mäkinen under GNU General Public License v3.0 */
 
+//#define EFG_HPP_DEBUG
+
 namespace {
 
 	namespace chrono = std::chrono;
@@ -234,6 +236,8 @@ namespace {
 			}
 			sdsl::construct(cst, std::string(input_path)+plain_suffix, 1); // generate index
 			sdsl::store_to_file(cst, index_file); // save it
+		} else {
+			std::cerr << "Index "<<index_file<< " located. Did you use option --heuristic-subset? If so, delete the index." << std::endl;
 		}
 
 		return true;
@@ -680,6 +684,12 @@ namespace {
 			bool output_paths,
 			std::vector<std::vector<size_type>> &out_paths
 	) {
+		out_labels.clear();
+		out_blocks.clear();
+		out_blocks.clear();
+		out_edges.clear();
+		out_paths.clear();
+
 		/* Convert arbitrary segmentation into EFG */
 		// TODO: check, O(log(n)) complexity of operations?
 		size_type const m = MSA.size();
@@ -1825,6 +1835,157 @@ namespace {
 		os << "}\n";
 		os.close();
 	}
+
+	bool contains_ignore_chars(const std::string &s, const std::string &ignorechars)
+	{
+		for (char c : ignorechars) {
+			if (s.find(c) != std::string::npos)
+				return true;
+		}
+		return false;
+	}
+
+
+	// check semi-repeat-free property of a node
+	bool efg_validate_node(
+			const size_type node,
+			const std::vector<std::string> &node_labels,
+			const std::vector<std::pair<size_type,size_type>> &ordered_edges,
+			const std::vector<size_type> &node_blocks,
+			const std::vector<bool> &is_source,
+			const std::vector<bool> &is_sink,
+			const std::string &ignore_chars,
+			const sdsl::csa_wt<> &index,
+			const sdsl::rank_support_v5<> &dels_rs,
+			const sdsl::select_support_mcl<> &dels_ss)
+	{
+		if (is_source[node] or is_sink[node])
+			return true;
+
+		if (ignore_chars.length() > 0 && contains_ignore_chars(node_labels[node], ignore_chars))
+			return true;
+
+
+		auto occs = sdsl::locate(index, node_labels[node]);
+		//int block = lead_rs(node + 1) - 1;
+		int block = node_blocks[node];
+
+		for (auto occ : occs) {
+			// locate edge
+			int occedge = dels_rs(occ);
+			int occedgeindex = occ - ((occedge == 0) ? 0 : dels_ss(occedge) + 1);
+			int slength = node_labels[ordered_edges[occedge].first].size();
+
+			// locate specific node in the edge
+			int occnode, occnodeindex, occmsaindex;
+			if (occedgeindex < slength) { // source node
+						      //occnode = std::distance(ordered_node_ids.begin(), std::find(ordered_node_ids.begin(), ordered_node_ids.end(), ordered_edges[occedge].first));
+				occnode = ordered_edges[occedge].first;
+				//assert(occnode < ordered_node_ids.size());
+				occnodeindex = occedgeindex;
+			} else { // target node
+				 //node = std::distance(ordered_node_ids.begin(), std::find(ordered_node_ids.begin(), ordered_node_ids.end(), ordered_edges[edge].second));
+				occnode = ordered_edges[occedge].second;
+				//assert(node < ordered_node_ids.size());
+				occnodeindex = occedgeindex - slength;
+			}
+
+			//int occblock = lead_rs(occnode + 1) - 1;
+			int occblock = node_blocks[occnode];
+
+#ifdef EFG_HPP_DEBUG
+			std::cerr << " edge : " << occedge + 1;
+			std::cerr << " edgeindex : " << occedgeindex + 1;
+			std::cerr << " node : " << occnode + 1;
+			std::cerr << " nodeindex : " << occnodeindex + 1;
+			std::cerr << " block : " << occblock + 1;
+			std::cerr << std::endl;
+#endif
+
+			// semi-repeat-free property (sources and sinks are special)
+			if (occnodeindex != 0 || block != occblock) {
+#ifdef EFG_HPP_DEBUG
+				std::cerr << "Invalid occurrence of node " << node_labels[node] << " (block " << block+1 << ") starting from node " << node_labels[occnode] << " (block " << block+1 << ")" << std::endl;
+#endif
+				return false;
+			}
+		}
+		return true;
+	}
+
+	bool efg_validate(
+		const std::vector <size_type> &block_indices,
+		const std::vector <std::string> &node_labels,
+		const std::vector <size_type> &node_blocks,
+		const adjacency_list &edges,
+		const std::string &ignore_chars,
+		std::vector<bool> &to_remove)
+	{
+		std::vector<bool> is_source;
+		std::vector<bool> is_sink;
+		sdsl::bit_vector leaders;
+		sdsl::rank_support_v5<> lead_rs;
+		sdsl::bit_vector delimiters;
+		sdsl::rank_support_v5<> dels_rs;
+		sdsl::select_support_mcl<> dels_ss;
+		sdsl::csa_wt<> index;
+
+		// build edge index
+		std::ostringstream edge_concat;
+		size_type cumulative_label_length = 0, cumulative_edge_length = 0, cumulative_walk_length = 0;
+
+		// edge index is concatenation of edge labels with separator chars
+		std::vector<std::pair<size_type,size_type>> ordered_edges;
+		for (size_type i = 0; i < node_labels.size(); i++) {
+			for (size_type j : edges[i]) {
+				cumulative_edge_length += node_labels[i].size() + node_labels[j].size();
+				ordered_edges.push_back({ i, j });
+			}
+		}
+
+		delimiters = sdsl::bit_vector(cumulative_edge_length + ordered_edges.size(), 0);
+
+		unsigned long int d = 0;
+		for (size_type i = 0; i < node_labels.size(); i++) {
+			for (size_type j : edges[i]) {
+				edge_concat << node_labels[i] << node_labels[j] << '#';
+				d += node_labels[i].size() + node_labels[j].size();
+				delimiters[d++] = 1;
+			}
+		}
+
+#ifdef EFG_HPP_DEBUG
+		std::cerr << "bitvector delimiters is " << delimiters << std::endl;
+		std::cerr << "edge index is           " << edge_concat.str() << std::endl;
+#endif
+
+		sdsl::construct_im(index, edge_concat.str(), 1);
+
+		// preprocess delimiters
+		sdsl::util::init_support(dels_rs, &delimiters);
+		sdsl::util::init_support(dels_ss, &delimiters);
+
+		is_source = std::vector<bool>(node_labels.size(), true);
+		is_sink = std::vector<bool>(node_labels.size(), true);
+
+		for (size_type i = 0; i < node_labels.size(); i++) {
+			for (size_type j : edges[i]) {
+				is_sink[i] = false;
+				is_source[j] = false;
+			}
+		}
+
+		bool result = true;
+		for (size_type i = 0; i < node_labels.size(); i++) {
+			if (!efg_validate_node(i, node_labels, ordered_edges, node_blocks, is_source, is_sink, ignore_chars, index, dels_rs, dels_ss)) {
+				to_remove[node_blocks[i]] = true;
+				result = false;
+			}
+		}
+
+		return result;
+	}
+
 }
 
 
@@ -1862,6 +2023,11 @@ int main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
+	if (args_info.heuristic_subset_arg < -1 || args_info.heuristic_subset_arg == 0) {
+		std::cerr << "wrong value for --heuristic-subset!\n";
+		return EXIT_FAILURE;
+	}
+
 	std::string ignorechars;
 	if (args_info.ignore_chars_arg != NULL)
 		ignorechars = std::string(args_info.ignore_chars_arg);
@@ -1870,20 +2036,27 @@ int main(int argc, char **argv)
 
 	auto start = chrono::high_resolution_clock::now();
 
-	std::vector<std::string> MSA;
+	std::vector<std::string> realMSA;
 	std::vector<std::string> identifiers;
-	read_input(args_info.input_arg, gap_limit, elastic, MSA, output_paths, identifiers);
-	if (MSA.empty())
+	read_input(args_info.input_arg, gap_limit, elastic, realMSA, output_paths, identifiers);
+	if (realMSA.empty())
 	{
 		std::cerr << "Unable to read sequences from the input\n.";
 		return EXIT_FAILURE;
 	}
-	std::cerr << "Input MSA[1.." << MSA.size() << ",1.." << MSA[0].size() << "]" << std::endl;   
+	std::cerr << "Input MSA[1.." << realMSA.size() << ",1.." << realMSA[0].size() << "]" << std::endl;   
 
 	// compute compressed suffix tree of the MSA (or load it if created in a previous run)
 	cst_type cst;
-	if (!load_cst(args_info.input_arg, MSA, cst, gap_limit))
-		return EXIT_FAILURE;
+	std::vector<std::string> miniMSA;
+	if (args_info.heuristic_subset_arg != -1) {
+		miniMSA = std::vector<std::string>(realMSA.begin(), realMSA.begin() + std::min((long)realMSA.size(), args_info.heuristic_subset_arg));
+		if (!load_cst(args_info.input_arg, miniMSA, cst, gap_limit))
+			return EXIT_FAILURE;
+	} else {
+		if (!load_cst(args_info.input_arg, realMSA, cst, gap_limit))
+			return EXIT_FAILURE;
+	}
 
 	std::cerr << "MSA index construction complete, index requires " << sdsl::size_in_mega_bytes(cst) << " MiB." << std::endl;
 
@@ -1895,22 +2068,22 @@ int main(int argc, char **argv)
 	int status = EXIT_SUCCESS;
 	if (elastic) { // semi-repeat-free efg
 		if (threads == -1)
-			segment_elastic_minmaxlength(MSA, cst, ignorechars, block_indices, disable_efg_tricks);
+			segment_elastic_minmaxlength((args_info.heuristic_subset_arg != -1) ? miniMSA : realMSA, cst, ignorechars, block_indices, disable_efg_tricks);
 		else if (threads > 0)
-			segment_elastic_minmaxlength_multithread(MSA, cst, ignorechars, block_indices, threads, disable_efg_tricks);
+			segment_elastic_minmaxlength_multithread((args_info.heuristic_subset_arg != -1) ? miniMSA : realMSA, cst, ignorechars, block_indices, threads, disable_efg_tricks);
 		else {
 			std::cerr << "Invalid number of threads." << std::endl;
 			return EXIT_FAILURE;
 		}
 		sdsl::util::clear(cst);
 	} else if (gap_limit == 1) { // no gaps
-		status = segment(MSA, cst, node_labels, edges);
+		status = segment(realMSA, cst, node_labels, edges);
 	} else {
-		status = segment2elasticValid(MSA, cst, node_labels, edges);
+		status = segment2elasticValid(realMSA, cst, node_labels, edges);
 	}
 
-	int m = MSA.size();
-	int n = MSA[0].length();
+	int m = realMSA.size();
+	int n = realMSA[0].length();
 
 	if (status == EXIT_FAILURE)
 		return EXIT_FAILURE;
@@ -1919,13 +2092,13 @@ int main(int argc, char **argv)
 	{
 		if (!output_gfa_format) {
 			std::cerr << "Writing the index to disk…\n";
-			make_efg(block_indices, MSA, node_labels, node_blocks, edges, output_paths, paths); // TODO: lower RAM usage for huge graphs
-			MSA.clear();
+			make_efg(block_indices, realMSA, node_labels, node_blocks, edges, output_paths, paths); // TODO: lower RAM usage for huge graphs
+			realMSA.clear();
 			make_index(node_labels, edges, args_info.output_arg, args_info.memory_chart_output_arg);
 		} else {
 			std::cerr << "Writing the xGFA to disk…\n";
-			make_efg(block_indices, MSA, node_labels, node_blocks, edges, output_paths, paths); // TODO: lower RAM usage for huge graphs
-			MSA.clear();
+			make_efg(block_indices, realMSA, node_labels, node_blocks, edges, output_paths, paths); // TODO: lower RAM usage for huge graphs
+			realMSA.clear();
 			make_gfa(m, n, identifiers, node_labels, edges, node_blocks, block_indices, output_paths, paths, args_info.output_arg, args_info.memory_chart_output_arg);
 		}
 	}
@@ -1933,12 +2106,36 @@ int main(int argc, char **argv)
 	{
 		if (!output_gfa_format) {
 			std::cerr << "Writing the index to disk…\n";
-			make_efg(block_indices, MSA, node_labels, node_blocks, edges, output_paths, paths); // TODO: lower RAM usage for huge graphs
-			MSA.clear();
+			make_efg(block_indices, realMSA, node_labels, node_blocks, edges, output_paths, paths); // TODO: lower RAM usage for huge graphs
+			realMSA.clear();
 			make_index(node_labels, edges, args_info.output_arg, args_info.memory_chart_output_arg);
 		} else {
-			output_efg(block_indices, MSA, output_paths, identifiers, args_info.output_arg);
-			std::cerr << "Writing the xGFA to disk…\n";
+			if (args_info.heuristic_subset_arg != -1) {
+				bool done = false;
+				int iterations = 0;
+				std::vector<bool> to_remove(block_indices.size(), false);
+				while (!done) {
+					iterations += 1;
+					make_efg(block_indices, realMSA, node_labels, node_blocks, edges, output_paths, paths); // TODO: lower RAM usage for huge graphs
+					done = efg_validate(block_indices, node_labels, node_blocks, edges, ignorechars, to_remove);
+
+					std::vector <size_type> new_block_indices;
+					for (size_type i = 0; i < block_indices.size(); i++) {
+						if (!to_remove[i]) {
+							new_block_indices.push_back(block_indices[i]);
+						} else {
+							to_remove[i] = false;
+						}
+					}
+					std::swap(block_indices, new_block_indices);
+				}
+				std::cerr << "Graph fixed in " << iterations << "iterations…\n";
+				std::cerr << "Writing the xGFA to disk…\n";
+				output_efg(block_indices, realMSA, output_paths, identifiers, args_info.output_arg);
+			} else {
+				std::cerr << "Writing the xGFA to disk…\n";
+				output_efg(block_indices, realMSA, output_paths, identifiers, args_info.output_arg);
+			}
 		}
 	}
 

@@ -47,6 +47,7 @@ const char *gengetopt_args_info_full_help[] = {
   "  -p, --output-paths            Print the original sequences as paths of the\n                                  xGFA graph (requires --gfa)  (default=off)",
   "      --ignore-chars=STRING     Ignore these characters for the indexability\n                                  property/pattern matching",
   "  -t, --threads=THREADNUM       Max # threads  (default=`-1')",
+  "      --heuristic-subset=ROWNUM Compute optimal segmentation based on the first\n                                  ROWNUM MSA rows for performance reasons, then\n                                  fix the resulting graph iteratively\n                                  (default=`-1')",
   "      --disable-elastic-tricks  Disable the tricks considering the start and\n                                  end of sequences as unique  (default=off)",
     0
 };
@@ -110,6 +111,7 @@ void clear_given (struct gengetopt_args_info *args_info)
   args_info->output_paths_given = 0 ;
   args_info->ignore_chars_given = 0 ;
   args_info->threads_given = 0 ;
+  args_info->heuristic_subset_given = 0 ;
   args_info->disable_elastic_tricks_given = 0 ;
 }
 
@@ -134,6 +136,8 @@ void clear_args (struct gengetopt_args_info *args_info)
   args_info->ignore_chars_orig = NULL;
   args_info->threads_arg = -1;
   args_info->threads_orig = NULL;
+  args_info->heuristic_subset_arg = -1;
+  args_info->heuristic_subset_orig = NULL;
   args_info->disable_elastic_tricks_flag = 0;
   
 }
@@ -156,7 +160,8 @@ void init_args_info(struct gengetopt_args_info *args_info)
   args_info->output_paths_help = gengetopt_args_info_full_help[10] ;
   args_info->ignore_chars_help = gengetopt_args_info_full_help[11] ;
   args_info->threads_help = gengetopt_args_info_full_help[12] ;
-  args_info->disable_elastic_tricks_help = gengetopt_args_info_full_help[13] ;
+  args_info->heuristic_subset_help = gengetopt_args_info_full_help[13] ;
+  args_info->disable_elastic_tricks_help = gengetopt_args_info_full_help[14] ;
   
 }
 
@@ -267,6 +272,7 @@ cmdline_parser_release (struct gengetopt_args_info *args_info)
   free_string_field (&(args_info->ignore_chars_arg));
   free_string_field (&(args_info->ignore_chars_orig));
   free_string_field (&(args_info->threads_orig));
+  free_string_field (&(args_info->heuristic_subset_orig));
   
   
 
@@ -323,6 +329,8 @@ cmdline_parser_dump(FILE *outfile, struct gengetopt_args_info *args_info)
     write_into_file(outfile, "ignore-chars", args_info->ignore_chars_orig, 0);
   if (args_info->threads_given)
     write_into_file(outfile, "threads", args_info->threads_orig, 0);
+  if (args_info->heuristic_subset_given)
+    write_into_file(outfile, "heuristic-subset", args_info->heuristic_subset_orig, 0);
   if (args_info->disable_elastic_tricks_given)
     write_into_file(outfile, "disable-elastic-tricks", 0, 0 );
   
@@ -632,6 +640,7 @@ cmdline_parser_internal (
         { "output-paths",	0, NULL, 'p' },
         { "ignore-chars",	1, NULL, 0 },
         { "threads",	1, NULL, 't' },
+        { "heuristic-subset",	1, NULL, 0 },
         { "disable-elastic-tricks",	0, NULL, 0 },
         { 0,  0, 0, 0 }
       };
@@ -784,6 +793,20 @@ cmdline_parser_internal (
                 &(local_args_info.ignore_chars_given), optarg, 0, 0, ARG_STRING,
                 check_ambiguity, override, 0, 0,
                 "ignore-chars", '-',
+                additional_error))
+              goto failure;
+          
+          }
+          /* Compute optimal segmentation based on the first ROWNUM MSA rows for performance reasons, then fix the resulting graph iteratively.  */
+          else if (strcmp (long_options[option_index].name, "heuristic-subset") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->heuristic_subset_arg), 
+                 &(args_info->heuristic_subset_orig), &(args_info->heuristic_subset_given),
+                &(local_args_info.heuristic_subset_given), optarg, 0, "-1", ARG_LONG,
+                check_ambiguity, override, 0, 0,
+                "heuristic-subset", '-',
                 additional_error))
               goto failure;
           

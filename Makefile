@@ -1,6 +1,7 @@
 GENGETOPT	?= gengetopt
 
 OPT_FLAGS	?= -Ofast -march=native
+#OPT_FLAGS	?= -O0 -g
 CFLAGS		+= $(OPT_FLAGS) -std=c99 -Wall
 CXXFLAGS	+= $(OPT_FLAGS) -pthread -std=c++17 -Wall
 SDSL_ROOT	= ./sdsl-lite/build
@@ -35,5 +36,5 @@ founderblockgraph.cc: cmdline.c
 %.o: %.c
 	$(CC) -c $(CPPFLAGS) $(CFLAGS) -o $@ $<
 
-#%.c: %.ggo
-#	$(GENGETOPT) --input="$<" -F $*
+%.c: %.ggo
+	$(GENGETOPT) --input="$<" -F $*
