@@ -1866,12 +1866,15 @@ namespace {
 			return true;
 
 
-		auto occs = sdsl::locate(index, node_labels[node]);
+		//auto occs = sdsl::locate(index, node_labels[node]);
+		sdsl::csa_wt<>::size_type l, r;
+		sdsl::backward_search(index, 0, index.size()-1, node_labels[node].begin(), node_labels[node].end(), l, r);
 		//int block = lead_rs(node + 1) - 1;
 		int block = node_blocks[node];
 
-		for (auto occ : occs) {
+		for (size_type i = l; i <= r; i++) {
 			// locate edge
+			int occ = index[i];
 			int occedge = dels_rs(occ);
 			int occedgeindex = occ - ((occedge == 0) ? 0 : dels_ss(occedge) + 1);
 			int slength = node_labels[ordered_edges[occedge].first].size();
