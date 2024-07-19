@@ -47,7 +47,7 @@ const char *gengetopt_args_info_full_help[] = {
   "  -p, --output-paths            Print the original sequences as paths of the\n                                  xGFA graph (requires --gfa)  (default=off)",
   "      --ignore-chars=STRING     Ignore these characters for the indexability\n                                  property/pattern matching",
   "  -t, --threads=THREADNUM       Max # threads  (default=`-1')",
-  "      --heuristic-subset=ROWNUM Compute optimal segmentation based on the first\n                                  ROWNUM MSA rows for performance reasons, then\n                                  fix the resulting graph iteratively\n                                  (default=`-1')",
+  "      --heuristic-subset=ROWNUM To save memory, compute the optimal\n                                  segmentation in chunks of ROWNUM MSA rows,\n                                  then fix the resulting graph iteratively,\n                                  sacrificing optimality  (default=`-1')",
   "      --disable-elastic-tricks  Disable the tricks considering the start and\n                                  end of sequences as unique  (default=off)",
     0
 };
@@ -797,7 +797,7 @@ cmdline_parser_internal (
               goto failure;
           
           }
-          /* Compute optimal segmentation based on the first ROWNUM MSA rows for performance reasons, then fix the resulting graph iteratively.  */
+          /* To save memory, compute the optimal segmentation in chunks of ROWNUM MSA rows, then fix the resulting graph iteratively, sacrificing optimality.  */
           else if (strcmp (long_options[option_index].name, "heuristic-subset") == 0)
           {
           

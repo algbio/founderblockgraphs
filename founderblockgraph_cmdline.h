@@ -67,9 +67,9 @@ struct gengetopt_args_info
   long threads_arg;	/**< @brief Max # threads (default='-1').  */
   char * threads_orig;	/**< @brief Max # threads original value given at command line.  */
   const char *threads_help; /**< @brief Max # threads help description.  */
-  long heuristic_subset_arg;	/**< @brief Compute optimal segmentation based on the first ROWNUM MSA rows for performance reasons, then fix the resulting graph iteratively (default='-1').  */
-  char * heuristic_subset_orig;	/**< @brief Compute optimal segmentation based on the first ROWNUM MSA rows for performance reasons, then fix the resulting graph iteratively original value given at command line.  */
-  const char *heuristic_subset_help; /**< @brief Compute optimal segmentation based on the first ROWNUM MSA rows for performance reasons, then fix the resulting graph iteratively help description.  */
+  long heuristic_subset_arg;	/**< @brief To save memory, compute the optimal segmentation in chunks of ROWNUM MSA rows, then fix the resulting graph iteratively, sacrificing optimality (default='-1').  */
+  char * heuristic_subset_orig;	/**< @brief To save memory, compute the optimal segmentation in chunks of ROWNUM MSA rows, then fix the resulting graph iteratively, sacrificing optimality original value given at command line.  */
+  const char *heuristic_subset_help; /**< @brief To save memory, compute the optimal segmentation in chunks of ROWNUM MSA rows, then fix the resulting graph iteratively, sacrificing optimality help description.  */
   int disable_elastic_tricks_flag;	/**< @brief Disable the tricks considering the start and end of sequences as unique (default=off).  */
   const char *disable_elastic_tricks_help; /**< @brief Disable the tricks considering the start and end of sequences as unique help description.  */
   

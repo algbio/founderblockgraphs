@@ -35,7 +35,9 @@ namespace {
 	namespace chrono = std::chrono;
 	namespace fbg = founder_block_graph;
 
+	//typedef sdsl::cst_sct3<sdsl::csa_wt<sdsl::wt_int<>>> cst_type;
 	typedef sdsl::cst_sct3<> cst_type;
+	typedef sdsl::csa_wt<> sa_type;
 	typedef cst_type::node_type node_t;
 	typedef cst_type::size_type size_type;
 
@@ -209,7 +211,7 @@ namespace {
 		std::string index_file = std::string(input_path) + plain_suffix + std::to_string(gap_limit) + index_suffix;
 
 		// Constructing compressed suffix tree for C
-		if (!sdsl::load_from_file(cst, index_file))
+		//if (!sdsl::load_from_file(cst, index_file))
 		{
 			std::cerr << "No index "<<index_file<< " located. Building index now." << std::endl;
 
@@ -228,20 +230,94 @@ namespace {
 				}
 				fs.close();
 			}
+			/*{
+				size_type size = 0;
+				for (auto const &seq : MSA) {
+					size += remove_gaps(seq).size() + 1;
+				}
+				sdsl::int_vector<> todisk(size, 0, 4);
+				size_type i = 0;
+				for (auto const &seq : MSA) {
+					for (auto const c : seq) {
+						if (c == '-')
+							continue;
+
+						if (c == 'A') {
+							todisk[i++] = 1;
+						} else if (c == 'C') {
+							todisk[i++] = 2;
+						} else if (c == 'G') {
+							todisk[i++] = 3;
+						} else if (c == 'T') {
+							todisk[i++] = 4;
+						} else {
+							todisk[i++] = 5;
+						}
+					}
+					// separator character
+					todisk[i++] = 6;
+				}
+				//sdsl::util::bit_compress(todisk);
+				std::fstream fs;
+				//fs.open(std::string(input_path) + plain_suffix, std::fstream::out);
+				//todisk.serialize(fs);
+				//fs.close();
+				sdsl::store_to_file(todisk, std::string(input_path) + plain_suffix);
+			}*/
 
 			std::ifstream in(std::string(input_path)+plain_suffix);
 			if (!in) {
 				std::cerr << "ERROR: File " << input_path << ".plain" << " does not exist. Exit." << std::endl;
 				return false;
 			}
+			//sdsl::construct(cst, std::string(input_path)+plain_suffix, 0); // generate index
 			sdsl::construct(cst, std::string(input_path)+plain_suffix, 1); // generate index
+			//sdsl::csXprintf(std::cout, "%3I%3S %3s %3P %3p %3L %3B  %T", cst, '$');
 			sdsl::store_to_file(cst, index_file); // save it
-		} else {
+		}/* else {
 			std::cerr << "Index "<<index_file<< " located. Did you use option --heuristic-subset? If so, delete the index." << std::endl;
+		}*/
+
+		return true;
+	}
+	bool load_sa(char const *input_path, std::vector<std::string> const &MSA, sa_type &sa) {
+
+		std::string const index_suffix(".sa");
+		std::string const plain_suffix(".sa.plain");
+		std::string index_file = std::string(input_path) + plain_suffix + index_suffix;
+
+		// Constructing compressed suffix tree for C
+		if (!sdsl::load_from_file(sa, index_file))
+		{
+			std::cerr << "No index "<<index_file<< " located. Building index now." << std::endl;
+
+			// Output concatenated inputs to disk. Remove gap symbols and add separators for indexing.
+			{
+				std::fstream fs;
+				fs.open(std::string(input_path) + plain_suffix, std::fstream::out);
+				for (auto const &seq : MSA)
+				{
+					for (long int i = 0; i < seq.size(); i++)
+					{
+						if ('-' != seq[i])
+							fs << seq[i];
+					}
+					fs << '#';
+				}
+				fs.close();
+			}
+
+			std::ifstream in(std::string(input_path)+plain_suffix);
+			if (!in) {
+				std::cerr << "ERROR: File " << input_path << ".plain" << " does not exist. Exit." << std::endl;
+				return false;
+			}
+			sdsl::construct(sa, std::string(input_path)+plain_suffix, 1); // generate index
+			sdsl::store_to_file(sa, index_file); // save it
 		}
 
 		return true;
-	}	
+	}
 
 	struct interval
 	{
@@ -686,7 +762,6 @@ namespace {
 	) {
 		out_labels.clear();
 		out_blocks.clear();
-		out_blocks.clear();
 		out_edges.clear();
 		out_paths.clear();
 
@@ -1005,7 +1080,7 @@ namespace {
 					}
 				}
 			}
-			f[x] = fimax;
+			f[x] = std::max(f[x], fimax);
 
 			for (size_type i = 0; i < m; i++) {
 				if (MSA[i][x] != '-') {
@@ -1119,7 +1194,7 @@ namespace {
 					}
 				}
 			}
-			f[x] = fimax;
+			f[x] = std::max(f[x], fimax);
 
 			for (size_type i = 0; i < m; i++) {
 				for (size_type ll = cst.lb(leaves[i]); ll <= cst.rb(leaves[i]); ll++) { // cst is not a generalized suffix tree
@@ -1135,12 +1210,152 @@ namespace {
 		}
 	}
 
+	size_type count_interval_union(
+		const size_type m,
+		const std::vector<size_type> &l,
+		const std::vector<size_type> &r,
+		const std::vector<bool> &to_consider,
+		const std::vector<bool> &to_ignore
+		)
+	{
+		std::vector<std::pair<size_type,size_type>> intervals;
+		for (size_type i = 0; i < m; i++) {
+			if (to_consider[i] && !to_ignore[i])
+				intervals.push_back({ l[i], r[i] });
+		}
+
+		// sort by starting interval pos
+		struct Local {
+			static bool pair_comparator(std::pair<size_type,size_type> a, std::pair<size_type,size_type> b) {
+				return (std::get<0>(a) < std::get<0>(b));
+			}
+		};
+		std::sort(intervals.begin(), intervals.end(), Local::pair_comparator);
+
+		size_type count = 0;
+		size_type active_interval_end_pos = 0; // first position where active interval is no longer active
+		for (const auto [start, end] : intervals) {
+			if (start >= active_interval_end_pos) {
+				count += end - start + 1;
+				active_interval_end_pos = end + 1;
+			} else if (end < active_interval_end_pos) { // && start < active_interval_end_pos
+				// fully contained in active interval, do nothing
+			} else { // start < active_interval_end_pos && active_interval_end_pos <= end
+				// intersects with active interval
+				count += end - active_interval_end_pos + 1;
+				active_interval_end_pos = end + 1;
+			}
+		}
+
+		return count;
+	}
+
+	void compute_f_heuristic(
+			size_type const m,
+			size_type const n,
+			size_type const x,
+			std::vector<size_type> &f, // store result here
+			std::vector<std::string> const &MSA,
+			sa_type const &sa,
+			std::string const &ignorechars,
+			std::vector<sdsl::rank_support_v5<>> const &rowsignore_rs,
+			sdsl::rank_support_v5<> const &concatenated_rows_rs,
+			std::vector<sdsl::rank_support_v5<>> const &indexedrows_rs,
+			std::vector<sdsl::select_support_mcl<>> const &indexedrows_ss,
+			const bool disable_efg_tricks = false
+			) {
+		//std::cerr << "Call to compute_f_heuristic for x = " << x << ", current f[x] is " << f[x] << std::endl;
+		// find ranges corresponding to strings starting at the (x+1)-th col and ending at the f[x]-th col
+		std::vector<size_type> l(m, 0);
+		std::vector<size_type> r(m, sa.size() - 1);
+		std::vector<bool> initialized(m, false);
+		std::vector<bool> to_ignore(m, false);
+		size_type active_rows = 0;
+		for (size_type i = 0; i < m; i++) {
+			if (indexedrows_rs[i].rank(x) != 0) {
+				initialized[i] = true;
+				active_rows += 1;
+				if (indexedrows_rs[i].rank(x) == indexedrows_rs[i].rank(n)) {
+				} else {
+					f[x] = std::max(f[x], indexedrows_ss[i](indexedrows_rs[i].rank(x)+1));
+				}
+			} else {
+				initialized[i] = false;
+			}
+		}
+		for (size_type i = 0; i < m; i++) {
+			if (initialized[i]) {
+				//std::cerr << "row " << i << "\nlooking for string MSA[" << i << "," << x << ".." << f[x] << "\n";
+				/*for (size_type j = x; j <= f[x]; j++) {
+					if (MSA[i][j] != '-')
+						std::cerr << MSA[i][j];
+				}
+				std::cerr << std::endl;*/
+
+				std::string s = remove_gaps(MSA[i].substr(x,f[x] - x + 1));
+				int res = sdsl::forward_search(sa, l[i], r[i], s.begin(), s.end(), l[i], r[i]);
+				assert(res != 0);
+			}
+		}
+
+		int iterations = 0;
+		while (f[x] < n - 1 && count_interval_union(m, l, r, initialized, to_ignore) > active_rows) {
+			f[x] += f[x] - x + 1;
+			iterations += 1;
+			if (iterations >= 5 || f[x] >= n - 1 || f[x] - x >= 50000) {// TODO disable efg tricks here?
+				f[x] = n - 1;
+				break;
+			}
+			for (size_type i = 0; i < m; i++) {
+				if (!to_ignore[i] && MSA[i][f[x]] != '-') {
+					if (!initialized[i]) {
+						active_rows += 1;
+						initialized[i] = true;
+					}
+					if (ignorechars.size() > 0 && rowsignore_rs[i](f[x]) - rowsignore_rs[i](f[x]-1) > 0) {
+						to_ignore[i] = true;
+						if (initialized[i]) {
+							active_rows -= 1; // we lose optimality!?
+						}
+					} else {
+						std::string s = remove_gaps(MSA[i].substr(x,f[x] - x + 1));
+						int res = sdsl::forward_search(sa, l[i], r[i], s.begin(), s.end(), l[i], r[i]);
+						assert(res != 0);
+					}
+				}
+			}
+		}
+	}
+
+	void compute_f_heuristic_interleaved(
+			size_type const m,
+			size_type const n,
+			size_type const startx,
+			size_type const jump,
+			std::vector<size_type> &f, // store result here
+			std::vector<std::string> const &MSA,
+			sa_type const &sa,
+			std::string const &ignorechars,
+			std::vector<sdsl::rank_support_v5<>> const &rowsignore_rs,
+			sdsl::rank_support_v5<> const &concatenated_rows_rs,
+			std::vector<sdsl::rank_support_v5<>> const &indexedrows_rs,
+			std::vector<sdsl::select_support_mcl<>> const &indexedrows_ss,
+			const bool disable_efg_tricks = false
+			) {
+		//std::cerr << "Call to compute_f_heuristic for x = " << x << ", current f[x] is " << f[x] << std::endl;
+		// find ranges corresponding to strings starting at the (x+1)-th col and ending at the f[x]-th col
+		for (size_type x = startx; x < n; x += jump) {
+			compute_f_heuristic(m, n, x, f, MSA, sa, ignorechars, rowsignore_rs, concatenated_rows_rs, indexedrows_rs, indexedrows_ss, disable_efg_tricks);
+		}
+	}
+
 	void segment_elastic_minmaxlength(
 			std::vector<std::string> const &MSA,
 			cst_type const &cst,
 			std::string &ignorechars,
 			std::vector<size_type> &out_indices,
-			const bool disable_efg_tricks = false
+			const bool disable_efg_tricks,
+			std::vector<size_type> &f
 			) {
 		size_type const n = MSA[0].size();
 		size_type const m = MSA.size();
@@ -1219,8 +1434,13 @@ namespace {
 		/* This is a preprocessing part of the main algorithm */
 
 		/* f[x] is minimum index greater or equal to x such that MSA[0..m-1][x..f[x]] is a semi-repeat-free segment */
-		std::vector<size_type> f(n, 0);
+		//f = std::vector<size_type>(n, 0);
 		compute_f(m, n, std::ref(f), std::ref(MSA), std::ref(cst), std::ref(ignorechars), std::ref(rowsignore_rs), std::ref(rowsignore_ss), std::ref(concatenated_rows_rs), std::ref(indexedrows_rs), std::ref(indexedrows_ss), disable_efg_tricks);
+
+		/*std::cerr << "f: ";
+		  for (auto fx : f)
+		  std::cerr << fx << " ";
+		  std::cerr << std::endl;*/
 
 		if (disable_efg_tricks) {
 			if (f[0] == n) {
@@ -1338,7 +1558,8 @@ namespace {
 			std::string &ignorechars,
 			std::vector<size_type> &out_indices,
 			int max_threads,
-			const bool disable_efg_tricks = false
+			const bool disable_efg_tricks,
+			std::vector<size_type> &f
 			) {
 		size_type const n = MSA[0].size();
 		size_type const m = MSA.size();
@@ -1428,7 +1649,7 @@ namespace {
 		sdsl::bit_vector color(cst.size(cst.root()), false);
 
 		/* f[x] is minimum index greater or equal to x such that MSA[0..m-1][x..f[x]] is a semi-repeat-free segment */
-		std::vector<size_type> f(n, 0);
+		//f = std::vector<size_type>(n, 0);
 		for (size_type x = 0; x < n;) {
 			std::vector<std::thread> t;
 			for (int i = 0; i < max_threads && x < n; i++) {
@@ -1469,6 +1690,415 @@ namespace {
 		// END OF PREPROCESSING
 
 		std::cerr << "Computing optimal segmentation..." << std::flush;
+		std::vector<size_type> count_solutions(n, 0);
+		std::vector<size_type> backtrack_count(n, 0);
+		std::vector<std::list<std::pair<size_type,size_type>>> transition_list(n + 2);
+		// NOTE: transition_list[n + 1] can be used to manage the terminator character
+		// UPDATE: this note probably is not true, this can be fixed in here
+		std::vector<size_type> minmaxlength(n + 1, 0);
+		std::vector<size_type> backtrack(n + 1, 0);
+		size_type y = 0, I = 0, S = n + 1, backtrack_S = -1;
+		for (size_type j = 1; j <= n; j++) {
+			while (j == std::get<1>(minimal_right_extensions[y])) {
+				size_type xy  = std::get<0>(minimal_right_extensions[y]);
+				size_type rec_score = minmaxlength[xy];
+				//std::cerr << "rec_score = " << rec_score << std::endl;
+				if (rec_score > n) {
+					// filter out cases when there is no recursive solution
+				} else if (j <= xy + rec_score) {
+					count_solutions[rec_score] += 1;
+					I = std::min(I, rec_score);
+					const size_type current_x = backtrack_count[rec_score];
+					if (xy + rec_score > current_x + minmaxlength[current_x]) {
+						backtrack_count[rec_score] = xy;
+					}
+					if (xy + rec_score + 1 <= n) {
+						transition_list[xy + rec_score + 1].push_back(minimal_right_extensions[y]);
+					}
+				} else {
+					if (j - xy < S) {
+						backtrack_S = xy;
+					}
+					S = std::min(S, j - xy);
+				}
+				y += 1;
+			}
+			for (auto pair : transition_list[j]) {
+				const size_type x = std::get<0>(pair);
+				count_solutions[minmaxlength[x]] -= 1;
+				if (j - x < S) {
+					S = j - x;
+					backtrack_S = x;
+				}
+				if (count_solutions[minmaxlength[x]] == 0) {
+					backtrack_count[minmaxlength[x]] = 0;
+				}
+			}
+			if (count_solutions[I] > 0 && I < S) { //TODO: what if I == S? should we pick the smallest backtrack?
+				minmaxlength[j] = I;
+				backtrack[j] = backtrack_count[I];
+			} else {
+				minmaxlength[j] = S;
+				backtrack[j] = backtrack_S;
+			}
+			S += 1;
+			if (count_solutions[I] == 0)
+				I += 1;
+		}
+		/*std::cerr << "minmaxlength: ";
+		  for (auto v : minmaxlength)
+		  std::cerr << v << " ";
+		  std::cerr << std::endl;
+		  std::cerr << "backtrack: ";
+		  for (auto v : backtrack)
+		  std::cerr << v << " ";
+		  std::cerr << std::endl;*/
+		std::cerr << "done (optimal segment length = " << minmaxlength[n] << ")." << std::endl << std::flush;
+
+		// NB: added block info
+		std::list<size_type> boundariestemp;
+		size_type j = n;
+		boundariestemp.push_front(j);
+		while (backtrack[j]!=0) {
+			//std::cerr << j << " ";
+			boundariestemp.push_front(backtrack[j]-1);
+			j = backtrack[j];
+		}
+
+		std::vector<size_type> boundaries;
+		for (const auto& j : boundariestemp)
+			boundaries.push_back(j);
+
+		std::swap(boundaries, out_indices);
+	}
+
+	void segment_elastic_minmaxlength_heuristic(
+			std::vector<std::string> const &MSA,
+			sa_type const &sa,
+			std::string &ignorechars,
+			std::vector<size_type> &out_indices,
+			const bool disable_efg_tricks,
+			std::vector<size_type> &f
+			) {
+		size_type const n = MSA[0].size();
+		size_type const m = MSA.size();
+		size_type nongap = 0;
+		size_type toignore = 0;
+		for (size_type i = 0; i < m; i++) { // TODO: MSA struct
+			for (size_type j = 0; j < n; j++) {
+				if (MSA[i][j] != '-')
+					nongap += 1;
+				if (ignorechars.find(MSA[i][j]) != std::string::npos)
+					toignore += 1;
+			}
+		}
+
+		std::cerr << "MSA contains " << (n*m) - nongap  << " gaps.\n" << std::flush;
+		std::cerr << "MSA contains " << toignore  << " characters to ignore for the semi-repeat-free property.\n" << std::flush;
+
+		// Preprocess the MSA rows for rank, select queries
+		std::cerr << "preprocessing MSA...";
+		std::vector<sdsl::bit_vector> indexedrows(m, sdsl::bit_vector(n, 1));
+		std::vector<sdsl::bit_vector> rowsignore(m, sdsl::bit_vector(n, 0)); // ignore chars
+		for (size_type i = 0; i < m; i++) {
+			for (size_type j = 0; j < n; j++) {
+				if (MSA[i][j] == '-')
+					indexedrows[i][j] = 0;
+				if (ignorechars.find(MSA[i][j]) != std::string::npos)
+					rowsignore[i][j] = 1;
+			}
+		}
+
+		// rank support on the rows
+		std::vector<sdsl::rank_support_v5<>> indexedrows_rs;
+		indexedrows_rs.resize(m);
+		for (size_type i = 0; i < m; i++) {
+			sdsl::rank_support_v5<> rs(&indexedrows[i]);
+			indexedrows_rs[i] = rs;
+		}
+
+		// select support on the rows
+		std::vector<sdsl::select_support_mcl<>> indexedrows_ss;
+		indexedrows_ss.resize(m);
+		for (size_type i = 0; i < m; i++) {
+			sdsl::select_support_mcl<> ss(&indexedrows[i]);
+			indexedrows_ss[i] = ss;
+		}
+
+		// rank, select on ignore chars
+		std::vector<sdsl::rank_support_v5<>> rowsignore_rs;
+		if (ignorechars.length() > 0) {
+			rowsignore_rs.resize(m);
+			for (size_type i = 0; i < m; i++) {
+				sdsl::rank_support_v5<> rs(&rowsignore[i]);
+				rowsignore_rs[i] = rs;
+			}
+		}
+
+		// bitvector + rank and select support for finding corresponding row
+		sdsl::bit_vector concatenated_rows(nongap + m, 0);
+		size_type k = 0;
+		for (size_type i = 0; i < m; i++) { // TODO: MSA struct
+			for (size_type j = 0; j < n; j++) {
+				if (MSA[i][j] != '-')
+					k += 1;
+			}
+			concatenated_rows[k++] = 1;
+		}
+		sdsl::rank_support_v5<> concatenated_rows_rs(&concatenated_rows);
+		std::cerr << "done." << std::endl;
+
+		/* This is a preprocessing part of the main algorithm */
+
+		/* f[x] is minimum index greater or equal to x such that MSA[0..m-1][x..f[x]] is a semi-repeat-free segment */
+		std::cerr << "Computing f values...";
+		for (size_type x = 0; x < n; x++) {
+			compute_f_heuristic(m, n, x, std::ref(f), std::ref(MSA), std::ref(sa), std::ref(ignorechars), std::ref(rowsignore_rs), std::ref(concatenated_rows_rs), std::ref(indexedrows_rs), std::ref(indexedrows_ss), disable_efg_tricks);
+		}
+		std::cerr << "done." << std::endl;
+
+		/*std::cerr << "f: ";
+		  for (auto fx : f)
+		  std::cerr << fx << " ";
+		  std::cerr << std::endl;*/
+
+		if (disable_efg_tricks) {
+			if (f[0] == n) {
+				std::cerr << "No valid segmentation found!\n";
+				exit(1);
+			}
+		}
+		// else there is always a valid segmentation
+
+		std::cerr << "Computing optimal segmentation...";
+		// Sort the resulting pairs (x,f(x)), make f(x) 1-indexed
+		std::vector<std::pair<size_type,size_type>> minimal_right_extensions;
+		minimal_right_extensions.resize(n);
+		for (size_type x = 0; x < n; x++) {
+			std::pair<size_type,size_type> p(x, f[x]+1);
+			minimal_right_extensions[x] = p;
+		}
+		// TODO: choose sorting algorithm
+		struct Local {
+			static bool pair_comparator(std::pair<size_type,size_type> a, std::pair<size_type,size_type> b) {
+				return (std::get<1>(a) < std::get<1>(b));
+			}
+		};
+		std::sort(minimal_right_extensions.begin(), minimal_right_extensions.end(), Local::pair_comparator);
+
+
+		// END OF PREPROCESSING
+
+		// TODO: swap size_type with int32 or optimal multiple of 2
+		std::vector<size_type> count_solutions(n, 0);
+		std::vector<size_type> backtrack_count(n, 0);
+		std::vector<std::list<std::pair<size_type,size_type>>> transition_list(n + 2);
+		// NOTE: transition_list[n + 1] can be used to manage the terminator character
+		// UPDATE: this note probably is not true, this can be fixed in here
+		std::vector<size_type> minmaxlength(n + 1, 0);
+		std::vector<size_type> backtrack(n + 1, 0);
+		size_type y = 0, I = 0, S = n + 1, backtrack_S = -1;
+		for (size_type j = 1; j <= n; j++) {
+			while (j == std::get<1>(minimal_right_extensions[y])) {
+				size_type xy  = std::get<0>(minimal_right_extensions[y]);
+				size_type rec_score = minmaxlength[xy];
+				//std::cerr << "rec_score = " << rec_score << std::endl;
+				if (rec_score > n) {
+					// filter out cases when there is no recursive solution
+				} else if (j <= xy + rec_score) {
+					count_solutions[rec_score] += 1;
+					I = std::min(I, rec_score);
+					const size_type current_x = backtrack_count[rec_score];
+					if (xy + rec_score > current_x + minmaxlength[current_x]) {
+						backtrack_count[rec_score] = xy;
+					}
+					if (xy + rec_score + 1 <= n) {
+						transition_list[xy + rec_score + 1].push_back(minimal_right_extensions[y]);
+					}
+				} else {
+					if (j - xy < S) {
+						backtrack_S = xy;
+					}
+					S = std::min(S, j - xy);
+				}
+				y += 1;
+			}
+			for (auto pair : transition_list[j]) {
+				const size_type x = std::get<0>(pair);
+				count_solutions[minmaxlength[x]] -= 1;
+				if (j - x < S) {
+					S = j - x;
+					backtrack_S = x;
+				}
+				if (count_solutions[minmaxlength[x]] == 0) {
+					backtrack_count[minmaxlength[x]] = 0;
+				}
+			}
+			if (count_solutions[I] > 0 && I < S) { //TODO: what if I == S? should we pick the smallest backtrack?
+				minmaxlength[j] = I;
+				backtrack[j] = backtrack_count[I];
+			} else {
+				minmaxlength[j] = S;
+				backtrack[j] = backtrack_S;
+			}
+			S += 1;
+			if (count_solutions[I] == 0)
+				I += 1;
+		}
+		/*std::cerr << "minmaxlength: ";
+		  for (auto v : minmaxlength)
+		  std::cerr << v << " ";
+		  std::cerr << std::endl;
+		  std::cerr << "backtrack: ";
+		  for (auto v : backtrack)
+		  std::cerr << v << " ";
+		  std::cerr << std::endl;*/
+		std::cerr << "done (optimal segment length = " << minmaxlength[n] << ")." << std::endl << std::flush;
+
+		// NB: added block info
+		std::list<size_type> boundariestemp;
+		size_type j = n;
+		boundariestemp.push_front(j);
+		while (backtrack[j]!=0) {
+			//std::cerr << j << " ";
+			boundariestemp.push_front(backtrack[j]-1);
+			j = backtrack[j];
+		}
+
+		std::vector<size_type> boundaries;
+		for (const auto& j : boundariestemp)
+			boundaries.push_back(j);
+
+		std::swap(boundaries, out_indices);
+	}
+
+	void segment_elastic_minmaxlength_heuristic_multithread(
+			std::vector<std::string> const &MSA,
+			sa_type const &sa,
+			std::string &ignorechars,
+			std::vector<size_type> &out_indices,
+			int max_threads,
+			const bool disable_efg_tricks,
+			std::vector<size_type> &f
+			) {
+		size_type const n = MSA[0].size();
+		size_type const m = MSA.size();
+		size_type nongap = 0;
+		size_type toignore = 0;
+		for (size_type i = 0; i < m; i++) { // TODO: MSA struct
+			for (size_type j = 0; j < n; j++) {
+				if (MSA[i][j] != '-')
+					nongap += 1;
+				if (ignorechars.find(MSA[i][j]) != std::string::npos)
+					toignore += 1;
+			}
+		}
+
+		std::cerr << "MSA contains " << (n*m) - nongap  << " gaps.\n" << std::flush;
+		std::cerr << "MSA contains " << toignore  << " characters to ignore for the semi-repeat-free property.\n" << std::flush;
+
+		// Preprocess the MSA rows for rank, select queries
+		std::cerr << "preprocessing MSA...";
+		std::vector<sdsl::bit_vector> indexedrows(m, sdsl::bit_vector(n, 1));
+		std::vector<sdsl::bit_vector> rowsignore(m, sdsl::bit_vector(n, 0)); // ignore chars
+		for (size_type i = 0; i < m; i++) {
+			for (size_type j = 0; j < n; j++) {
+				if (MSA[i][j] == '-')
+					indexedrows[i][j] = 0;
+				if (ignorechars.find(MSA[i][j]) != std::string::npos)
+					rowsignore[i][j] = 1;
+			}
+		}
+
+		// rank support on the rows
+		std::vector<sdsl::rank_support_v5<>> indexedrows_rs;
+		indexedrows_rs.resize(m);
+		for (size_type i = 0; i < m; i++) {
+			sdsl::rank_support_v5<> rs(&indexedrows[i]);
+			indexedrows_rs[i] = rs;
+		}
+
+		// select support on the rows
+		std::vector<sdsl::select_support_mcl<>> indexedrows_ss;
+		indexedrows_ss.resize(m);
+		for (size_type i = 0; i < m; i++) {
+			sdsl::select_support_mcl<> ss(&indexedrows[i]);
+			indexedrows_ss[i] = ss;
+		}
+
+		// rank, select on ignore chars
+		std::vector<sdsl::rank_support_v5<>> rowsignore_rs;
+		if (ignorechars.length() > 0) {
+			rowsignore_rs.resize(m);
+			for (size_type i = 0; i < m; i++) {
+				sdsl::rank_support_v5<> rs(&rowsignore[i]);
+				rowsignore_rs[i] = rs;
+			}
+		}
+
+		// bitvector + rank and select support for finding corresponding row
+		sdsl::bit_vector concatenated_rows(nongap + m, 0);
+		size_type k = 0;
+		for (size_type i = 0; i < m; i++) { // TODO: MSA struct
+			for (size_type j = 0; j < n; j++) {
+				if (MSA[i][j] != '-')
+					k += 1;
+			}
+			concatenated_rows[k++] = 1;
+		}
+		sdsl::rank_support_v5<> concatenated_rows_rs(&concatenated_rows);
+		std::cerr << "done." << std::endl;
+
+		/* This is a preprocessing part of the main algorithm */
+
+		/* f[x] is minimum index greater or equal to x such that MSA[0..m-1][x..f[x]] is a semi-repeat-free segment */
+		std::cerr << "Computing f values...";
+		for (size_type x = 0; x < n;) {
+			std::vector<std::thread> t;
+			for (int i = 0; i < max_threads && x < n; i++) {
+				//std::cerr << "Calling compute_f_range for range" << x << " to " << std::min(x + n/max_threads, n-1) << std::endl << std::flush;
+				t.push_back(std::thread(compute_f_heuristic_interleaved, m, n, i, max_threads, std::ref(f), std::ref(MSA), std::ref(sa), std::ref(ignorechars), std::ref(rowsignore_rs), std::ref(concatenated_rows_rs), std::ref(indexedrows_rs), std::ref(indexedrows_ss), disable_efg_tricks));
+			}
+			for (auto &tt : t)
+			{
+				tt.join();
+			}
+		}
+		std::cerr << "done." << std::endl;
+
+		/*std::cerr << "f: ";
+		  for (auto fx : f)
+		  std::cerr << fx << " ";
+		  std::cerr << std::endl;*/
+
+		if (disable_efg_tricks) {
+			if (f[0] == n) {
+				std::cerr << "No valid segmentation found!\n";
+				exit(1);
+			}
+		}
+		// else there is always a valid segmentation
+
+		std::cerr << "Computing optimal segmentation..." << std::flush;
+		// Sort the resulting pairs (x,f(x)), make f(x) 1-indexed
+		std::vector<std::pair<size_type,size_type>> minimal_right_extensions;
+		minimal_right_extensions.resize(n);
+		for (size_type x = 0; x < n; x++) {
+			std::pair<size_type,size_type> p(x, f[x]+1);
+			minimal_right_extensions[x] = p;
+		}
+		// TODO: choose sorting algorithm
+		struct Local {
+			static bool pair_comparator(std::pair<size_type,size_type> a, std::pair<size_type,size_type> b) {
+				return (std::get<1>(a) < std::get<1>(b));
+			}
+		};
+		std::sort(minimal_right_extensions.begin(), minimal_right_extensions.end(), Local::pair_comparator);
+
+
+		// END OF PREPROCESSING
+
+		// TODO: swap size_type with int32 or optimal multiple of 2
 		std::vector<size_type> count_solutions(n, 0);
 		std::vector<size_type> backtrack_count(n, 0);
 		std::vector<std::list<std::pair<size_type,size_type>>> transition_list(n + 2);
@@ -1896,14 +2526,14 @@ namespace {
 			//int occblock = lead_rs(occnode + 1) - 1;
 			int occblock = node_blocks[occnode];
 
-#ifdef EFG_HPP_DEBUG
-			std::cerr << " edge : " << occedge + 1;
-			std::cerr << " edgeindex : " << occedgeindex + 1;
-			std::cerr << " node : " << occnode + 1;
-			std::cerr << " nodeindex : " << occnodeindex + 1;
-			std::cerr << " block : " << occblock + 1;
-			std::cerr << std::endl;
-#endif
+//#ifdef EFG_HPP_DEBUG
+//			std::cerr << " edge : " << occedge + 1;
+//			std::cerr << " edgeindex : " << occedgeindex + 1;
+//			std::cerr << " node : " << occnode + 1;
+//			std::cerr << " nodeindex : " << occnodeindex + 1;
+//			std::cerr << " block : " << occblock + 1;
+//			std::cerr << std::endl;
+//#endif
 
 			// semi-repeat-free property (sources and sinks are special)
 			if (occnodeindex != 0 || block != occblock) {
@@ -1916,12 +2546,37 @@ namespace {
 		return true;
 	}
 
+	void efg_validate_worker(
+			const size_type startnode,
+			const long step,
+			const std::vector<std::string> &node_labels,
+			const std::vector<std::pair<size_type,size_type>> &ordered_edges,
+			const std::vector<size_type> &node_blocks,
+			const std::vector<bool> &is_source,
+			const std::vector<bool> &is_sink,
+			const std::string &ignore_chars,
+			const sdsl::csa_wt<> &index,
+			const sdsl::rank_support_v5<> &dels_rs,
+			const sdsl::select_support_mcl<> &dels_ss,
+			std::vector<bool> &to_remove)
+	{
+		for (size_type i = startnode; i < node_labels.size(); i+= step) {
+			if (!efg_validate_node(i, node_labels, ordered_edges, node_blocks, is_source, is_sink, ignore_chars, index, dels_rs, dels_ss)) {
+				//to_remove[node_blocks[i]] = true;
+				//TODO DEBUG
+				assert(node_blocks[i] > 0 and node_blocks[i] < to_remove.size());
+				to_remove[node_blocks[i]-1] = true;
+			}
+		}
+	}
+
 	bool efg_validate(
 		const std::vector <size_type> &block_indices,
 		const std::vector <std::string> &node_labels,
 		const std::vector <size_type> &node_blocks,
 		const adjacency_list &edges,
 		const std::string &ignore_chars,
+		const long threads,
 		std::vector<bool> &to_remove)
 	{
 		std::vector<bool> is_source;
@@ -1957,10 +2612,10 @@ namespace {
 			}
 		}
 
-#ifdef EFG_HPP_DEBUG
-		std::cerr << "bitvector delimiters is " << delimiters << std::endl;
-		std::cerr << "edge index is           " << edge_concat.str() << std::endl;
-#endif
+//#ifdef EFG_HPP_DEBUG
+//		std::cerr << "bitvector delimiters is " << delimiters << std::endl;
+//		std::cerr << "edge index is           " << edge_concat.str() << std::endl;
+//#endif
 
 		sdsl::construct_im(index, edge_concat.str(), 1);
 
@@ -1971,6 +2626,7 @@ namespace {
 		is_source = std::vector<bool>(node_labels.size(), true);
 		is_sink = std::vector<bool>(node_labels.size(), true);
 
+		// TODO: parallelize this?
 		for (size_type i = 0; i < node_labels.size(); i++) {
 			for (size_type j : edges[i]) {
 				is_sink[i] = false;
@@ -1979,10 +2635,30 @@ namespace {
 		}
 
 		bool result = true;
-		for (size_type i = 0; i < node_labels.size(); i++) {
-			if (!efg_validate_node(i, node_labels, ordered_edges, node_blocks, is_source, is_sink, ignore_chars, index, dels_rs, dels_ss)) {
-				to_remove[node_blocks[i]] = true;
-				result = false;
+		if (threads == -1) {
+			for (size_type i = 0; i < node_labels.size(); i++) {
+				if (!efg_validate_node(i, node_labels, ordered_edges, node_blocks, is_source, is_sink, ignore_chars, index, dels_rs, dels_ss)) {
+					//to_remove[node_blocks[i]] = true;
+					//TODO DEBUG
+					if (node_blocks[i] > 0)
+						to_remove[node_blocks[i]-1] = true;
+					result = false;
+				}
+			}
+		} else {
+			std::vector<std::thread> t;
+			for (int i = 0; i < threads; i++) {
+				t.push_back(std::thread(efg_validate_worker, i, threads, std::ref(node_labels), std::ref(ordered_edges), std::ref(node_blocks), std::ref(is_source), std::ref(is_sink), std::ref(ignore_chars), std::ref(index), std::ref(dels_rs), std::ref(dels_ss), std::ref(to_remove)));
+			}
+			for (auto &tt : t)
+			{
+				tt.join();
+			}
+			for (size_type i = 0; i < to_remove.size(); i++) {
+				if (to_remove[i]) {
+					result = false;
+					break;
+				}
 			}
 		}
 
@@ -2052,10 +2728,12 @@ int main(int argc, char **argv)
 	// compute compressed suffix tree of the MSA (or load it if created in a previous run)
 	cst_type cst;
 	std::vector<std::string> miniMSA;
+	size_type miniMSArow = 0;
 	if (args_info.heuristic_subset_arg != -1) {
-		miniMSA = std::vector<std::string>(realMSA.begin(), realMSA.begin() + std::min((long)realMSA.size(), args_info.heuristic_subset_arg));
+		miniMSA = std::vector<std::string>(realMSA.begin() + miniMSArow, realMSA.begin() + std::min((long)realMSA.size(), (long)miniMSArow + args_info.heuristic_subset_arg));
 		if (!load_cst(args_info.input_arg, miniMSA, cst, gap_limit))
 			return EXIT_FAILURE;
+		miniMSArow += args_info.heuristic_subset_arg;
 	} else {
 		if (!load_cst(args_info.input_arg, realMSA, cst, gap_limit))
 			return EXIT_FAILURE;
@@ -2068,15 +2746,48 @@ int main(int argc, char **argv)
 	std::vector <size_type> block_indices; // starting index of each block
 	adjacency_list edges;
 	std::vector<std::vector<size_type>> paths;
+	std::vector<size_type> f(realMSA[0].size(), 0); // TODO initialize here
 	int status = EXIT_SUCCESS;
 	if (elastic) { // semi-repeat-free efg
 		if (threads == -1)
-			segment_elastic_minmaxlength((args_info.heuristic_subset_arg != -1) ? miniMSA : realMSA, cst, ignorechars, block_indices, disable_efg_tricks);
+			segment_elastic_minmaxlength((args_info.heuristic_subset_arg != -1) ? miniMSA : realMSA, cst, ignorechars, block_indices, disable_efg_tricks, f);
 		else if (threads > 0)
-			segment_elastic_minmaxlength_multithread((args_info.heuristic_subset_arg != -1) ? miniMSA : realMSA, cst, ignorechars, block_indices, threads, disable_efg_tricks);
+			segment_elastic_minmaxlength_multithread((args_info.heuristic_subset_arg != -1) ? miniMSA : realMSA, cst, ignorechars, block_indices, threads, disable_efg_tricks, f);
 		else {
 			std::cerr << "Invalid number of threads." << std::endl;
 			return EXIT_FAILURE;
+		}
+
+		if (args_info.heuristic_subset_arg != -1) {
+			while (miniMSArow < realMSA.size()) {
+				miniMSA.clear();
+				miniMSA = std::vector<std::string>(realMSA.begin() + miniMSArow, realMSA.begin() + std::min((long)realMSA.size(), (long)miniMSArow + args_info.heuristic_subset_arg));
+				if (!load_cst(args_info.input_arg, miniMSA, cst, gap_limit))
+					return EXIT_FAILURE;
+
+				if (threads == -1)
+					segment_elastic_minmaxlength((args_info.heuristic_subset_arg != -1) ? miniMSA : realMSA, cst, ignorechars, block_indices, disable_efg_tricks, f);
+				else if (threads > 0)
+					segment_elastic_minmaxlength_multithread((args_info.heuristic_subset_arg != -1) ? miniMSA : realMSA, cst, ignorechars, block_indices, threads, disable_efg_tricks, f);
+				else {
+					std::cerr << "Invalid number of threads." << std::endl;
+					return EXIT_FAILURE;
+				}
+				miniMSArow += args_info.heuristic_subset_arg;
+			}
+
+			/*std::cerr << "Indexing graph once more...";
+			sa_type sa;
+			if (!load_sa(args_info.input_arg, realMSA, sa))
+				return EXIT_FAILURE;
+			std::cerr << "Indexing graph once more...done.";
+			if (threads == -1) {
+				segment_elastic_minmaxlength_heuristic(realMSA, sa, ignorechars, block_indices, disable_efg_tricks, f);
+			} else {
+				segment_elastic_minmaxlength_heuristic_multithread(realMSA, sa, ignorechars, block_indices, threads, disable_efg_tricks, f);
+			}*/
+		} else {
+			f.clear();
 		}
 		sdsl::util::clear(cst);
 	} else if (gap_limit == 1) { // no gaps
@@ -2120,7 +2831,19 @@ int main(int argc, char **argv)
 				while (!done) {
 					iterations += 1;
 					make_efg(block_indices, realMSA, node_labels, node_blocks, edges, output_paths, paths); // TODO: lower RAM usage for huge graphs
-					done = efg_validate(block_indices, node_labels, node_blocks, edges, ignorechars, to_remove);
+					done = efg_validate(block_indices, node_labels, node_blocks, edges, ignorechars, threads, to_remove);
+
+					std::cerr << "There are ";
+					size_type invalidblocks = 0;
+					for (auto a : to_remove)
+						invalidblocks += a;
+					std::cerr << invalidblocks << " blocks to remove" << std::endl;
+					/*std::cerr << "the blocks are ";
+					for (size_type i = 0; i < block_indices.size(); i++) {
+						if (to_remove[i])
+							std::cerr << block_indices[i] << " ";
+					}
+					std::cerr << std::endl;*/
 
 					std::vector <size_type> new_block_indices;
 					for (size_type i = 0; i < block_indices.size(); i++) {
@@ -2132,7 +2855,7 @@ int main(int argc, char **argv)
 					}
 					std::swap(block_indices, new_block_indices);
 				}
-				std::cerr << "Graph fixed in " << iterations << "iterations…\n";
+				std::cerr << "Graph fixed in " << iterations-1 << "iterations…\n";
 				std::cerr << "Writing the xGFA to disk…\n";
 				output_efg(block_indices, realMSA, output_paths, identifiers, args_info.output_arg);
 			} else {
