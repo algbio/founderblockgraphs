@@ -280,6 +280,35 @@ namespace {
 
 		return true;
 	}
+	bool compute_cst_im(std::vector<std::string> const &MSA, cst_type &cst) {
+		std::string msaconcat;
+
+		// Constructing compressed suffix tree for C
+		//if (!sdsl::load_from_file(cst, index_file))
+		{
+			// compute concatenated inputs. Remove gap symbols and add separators for indexing.
+			{
+				for (auto const &seq : MSA)
+				{
+					for (auto const c : seq)
+					{
+						if ('-' != c)
+							msaconcat += c;
+					}
+					msaconcat += '#';
+				}
+			}
+
+			//sdsl::construct(cst, std::string(input_path)+plain_suffix, 0); // generate index
+			sdsl::construct_im(cst, msaconcat, 1); // generate index
+			//sdsl::csXprintf(std::cout, "%3I%3S %3s %3P %3p %3L %3B  %T", cst, '$');
+			//sdsl::store_to_file(cst, index_file); // save it
+		}/* else {
+			std::cerr << "Index "<<index_file<< " located. Did you use option --heuristic-subset? If so, delete the index." << std::endl;
+		}*/
+
+		return true;
+	}
 	bool load_sa(char const *input_path, std::vector<std::string> const &MSA, sa_type &sa) {
 
 		std::string const index_suffix(".sa");
@@ -1355,7 +1384,8 @@ namespace {
 			std::string &ignorechars,
 			std::vector<size_type> &out_indices,
 			const bool disable_efg_tricks,
-			std::vector<size_type> &f
+			std::vector<size_type> &f,
+			const bool segment = true
 			) {
 		size_type const n = MSA[0].size();
 		size_type const m = MSA.size();
@@ -1441,6 +1471,8 @@ namespace {
 		  for (auto fx : f)
 		  std::cerr << fx << " ";
 		  std::cerr << std::endl;*/
+		if (!segment)
+			return;
 
 		if (disable_efg_tricks) {
 			if (f[0] == n) {
@@ -1550,6 +1582,146 @@ namespace {
 			boundaries.push_back(j);
 
 		std::swap(boundaries, out_indices);
+	}
+
+	void segment_elastic_minmaxlength(
+			std::vector<size_type> &out_indices,
+			const bool disable_efg_tricks,
+			std::vector<size_type> &f,
+			size_type n
+			) {
+		if (disable_efg_tricks) {
+			if (f[0] == n) {
+				std::cerr << "No valid segmentation found!\n";
+				exit(1);
+			}
+		}
+		// else there is always a valid segmentation
+
+		// Sort the resulting pairs (x,f(x)), make f(x) 1-indexed
+		std::vector<std::pair<size_type,size_type>> minimal_right_extensions;
+		minimal_right_extensions.resize(n);
+		for (size_type x = 0; x < n; x++) {
+			std::pair<size_type,size_type> p(x, f[x]+1);
+			minimal_right_extensions[x] = p;
+		}
+		// TODO: choose sorting algorithm
+		struct Local {
+			static bool pair_comparator(std::pair<size_type,size_type> a, std::pair<size_type,size_type> b) {
+				return (std::get<1>(a) < std::get<1>(b));
+			}
+		};
+		std::sort(minimal_right_extensions.begin(), minimal_right_extensions.end(), Local::pair_comparator);
+
+
+		// END OF PREPROCESSING
+
+		std::cerr << "Computing optimal segmentation..." << std::flush;
+		// TODO: swap size_type with int32 or optimal multiple of 2
+		std::vector<size_type> count_solutions(n, 0);
+		std::vector<size_type> backtrack_count(n, 0);
+		std::vector<std::list<std::pair<size_type,size_type>>> transition_list(n + 2);
+		// NOTE: transition_list[n + 1] can be used to manage the terminator character
+		// UPDATE: this note probably is not true, this can be fixed in here
+		std::vector<size_type> minmaxlength(n + 1, 0);
+		std::vector<size_type> backtrack(n + 1, 0);
+		size_type y = 0, I = 0, S = n + 1, backtrack_S = -1;
+		for (size_type j = 1; j <= n; j++) {
+			while (j == std::get<1>(minimal_right_extensions[y])) {
+				size_type xy  = std::get<0>(minimal_right_extensions[y]);
+				size_type rec_score = minmaxlength[xy];
+				//std::cerr << "rec_score = " << rec_score << std::endl;
+				if (rec_score > n) {
+					// filter out cases when there is no recursive solution
+				} else if (j <= xy + rec_score) {
+					count_solutions[rec_score] += 1;
+					I = std::min(I, rec_score);
+					const size_type current_x = backtrack_count[rec_score];
+					if (xy + rec_score > current_x + minmaxlength[current_x]) {
+						backtrack_count[rec_score] = xy;
+					}
+					if (xy + rec_score + 1 <= n) {
+						transition_list[xy + rec_score + 1].push_back(minimal_right_extensions[y]);
+					}
+				} else {
+					if (j - xy < S) {
+						backtrack_S = xy;
+					}
+					S = std::min(S, j - xy);
+				}
+				y += 1;
+			}
+			for (auto pair : transition_list[j]) {
+				const size_type x = std::get<0>(pair);
+				count_solutions[minmaxlength[x]] -= 1;
+				if (j - x < S) {
+					S = j - x;
+					backtrack_S = x;
+				}
+				if (count_solutions[minmaxlength[x]] == 0) {
+					backtrack_count[minmaxlength[x]] = 0;
+				}
+			}
+			if (count_solutions[I] > 0 && I < S) { //TODO: what if I == S? should we pick the smallest backtrack?
+				minmaxlength[j] = I;
+				backtrack[j] = backtrack_count[I];
+			} else {
+				minmaxlength[j] = S;
+				backtrack[j] = backtrack_S;
+			}
+			S += 1;
+			if (count_solutions[I] == 0)
+				I += 1;
+		}
+		/*std::cerr << "minmaxlength: ";
+		  for (auto v : minmaxlength)
+		  std::cerr << v << " ";
+		  std::cerr << std::endl;
+		  std::cerr << "backtrack: ";
+		  for (auto v : backtrack)
+		  std::cerr << v << " ";
+		  std::cerr << std::endl;*/
+		std::cerr << "done (optimal segment length = " << minmaxlength[n] << ")." << std::endl << std::flush;
+
+		// NB: added block info
+		std::list<size_type> boundariestemp;
+		size_type j = n;
+		boundariestemp.push_front(j);
+		while (backtrack[j]!=0) {
+			//std::cerr << j << " ";
+			boundariestemp.push_front(backtrack[j]-1);
+			j = backtrack[j];
+		}
+
+		std::vector<size_type> boundaries;
+		for (const auto& j : boundariestemp)
+			boundaries.push_back(j);
+
+		std::swap(boundaries, out_indices);
+	}
+
+	void segment_elastic_minmaxlength_worker(
+			std::vector<std::string> const &MSA,
+			std::string &ignorechars,
+			std::vector<size_type> &out_indices,
+			const bool disable_efg_tricks,
+			std::vector<size_type> &f,
+			const long rows,
+			size_type startrow, // 0-based, included
+			const size_type endrow // 0-based, included
+			) {
+		cst_type cst;
+		std::vector<std::string> miniMSA;
+		while (startrow <= endrow) {
+			auto begin = MSA.begin() + startrow;
+			auto end = MSA.begin() + std::min(startrow + rows, endrow + 1);
+
+			std::cerr << "Computing the CST of MSA[" << startrow << ".." << startrow + (end - begin) - 1 << "] (startrow is " << startrow << ")\n";
+			miniMSA = std::vector<std::string>(begin, end);
+			compute_cst_im(miniMSA, cst);
+			segment_elastic_minmaxlength(miniMSA, cst, ignorechars, out_indices, disable_efg_tricks, f, false);
+			startrow += rows;
+		}
 	}
 
 	void segment_elastic_minmaxlength_multithread(
@@ -2759,33 +2931,38 @@ int main(int argc, char **argv)
 		}
 
 		if (args_info.heuristic_subset_arg != -1) {
-			while (miniMSArow < realMSA.size()) {
-				miniMSA.clear();
-				miniMSA = std::vector<std::string>(realMSA.begin() + miniMSArow, realMSA.begin() + std::min((long)realMSA.size(), (long)miniMSArow + args_info.heuristic_subset_arg));
-				if (!load_cst(args_info.input_arg, miniMSA, cst, gap_limit))
-					return EXIT_FAILURE;
-
-				if (threads == -1)
-					segment_elastic_minmaxlength((args_info.heuristic_subset_arg != -1) ? miniMSA : realMSA, cst, ignorechars, block_indices, disable_efg_tricks, f);
-				else if (threads > 0)
-					segment_elastic_minmaxlength_multithread((args_info.heuristic_subset_arg != -1) ? miniMSA : realMSA, cst, ignorechars, block_indices, threads, disable_efg_tricks, f);
-				else {
-					std::cerr << "Invalid number of threads." << std::endl;
-					return EXIT_FAILURE;
-				}
-				miniMSArow += args_info.heuristic_subset_arg;
-			}
-
-			/*std::cerr << "Indexing graph once more...";
-			sa_type sa;
-			if (!load_sa(args_info.input_arg, realMSA, sa))
-				return EXIT_FAILURE;
-			std::cerr << "Indexing graph once more...done.";
 			if (threads == -1) {
-				segment_elastic_minmaxlength_heuristic(realMSA, sa, ignorechars, block_indices, disable_efg_tricks, f);
+				while (miniMSArow < realMSA.size()) {
+					miniMSA.clear();
+					miniMSA = std::vector<std::string>(realMSA.begin() + miniMSArow, realMSA.begin() + std::min((long)realMSA.size(), (long)miniMSArow + args_info.heuristic_subset_arg));
+					if (!load_cst(args_info.input_arg, miniMSA, cst, gap_limit))
+						return EXIT_FAILURE;
+
+					if (threads == -1)
+						segment_elastic_minmaxlength((args_info.heuristic_subset_arg != -1) ? miniMSA : realMSA, cst, ignorechars, block_indices, disable_efg_tricks, f);
+					else if (threads > 0)
+						segment_elastic_minmaxlength_multithread((args_info.heuristic_subset_arg != -1) ? miniMSA : realMSA, cst, ignorechars, block_indices, threads, disable_efg_tricks, f);
+					else {
+						std::cerr << "Invalid number of threads." << std::endl;
+						return EXIT_FAILURE;
+					}
+					miniMSArow += args_info.heuristic_subset_arg;
+				}
 			} else {
-				segment_elastic_minmaxlength_heuristic_multithread(realMSA, sa, ignorechars, block_indices, threads, disable_efg_tricks, f);
-			}*/
+				std::vector<std::thread> t;
+				const int step = ((realMSA.size() - args_info.heuristic_subset_arg) / threads) + 1;
+				for (; miniMSArow < realMSA.size(); miniMSArow += step) {
+					std::cerr << "calling segment_elastic_minmaxlength_worker on rows [" << miniMSArow << ".." << std::min(realMSA.size() - 1, miniMSArow + step - 1) << "]\n";
+					t.push_back(std::thread(segment_elastic_minmaxlength_worker, std::ref(realMSA), std::ref(ignorechars), std::ref(block_indices), std::ref(disable_efg_tricks), std::ref(f), args_info.heuristic_subset_arg, miniMSArow, std::min(realMSA.size() - 1, miniMSArow + step - 1)));
+				}
+
+				for (auto &tt : t)
+				{
+					tt.join();
+				}
+
+				segment_elastic_minmaxlength(block_indices, disable_efg_tricks, f, realMSA[0].size());
+			}
 		} else {
 			f.clear();
 		}
