@@ -8,12 +8,10 @@ $ git clone --recurse-submodules https://github.com/algbio/founderblockgraphs.gi
 $ cd founderblockgraphs
 ```
 
-Build sdsl-lite:
+Build sdsl-lite-v3:
 ```
-$ cd sdsl-lite
-$ export GNUMAKEFLAGS=-j9
-$ ./install.sh
-$ export GNUMAKEFLAGS=
+$ cd sdsl-lite-v3
+$ ./install.sh .
 $ cd ..
 ```
 
@@ -33,6 +31,7 @@ Input is MSA given in fasta format. In standard mode (without --elastic), rows
 with runs of gaps ‘-’ or N’s ≥ GAPLIMIT will be filtered out.
 
   -h, --help                    Print help and exit
+      --full-help               Print help, including hidden options, and exit
   -V, --version                 Print version and exit
       --input=filename          MSA input path
       --output=filename         Index/EFG output path
