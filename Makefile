@@ -4,10 +4,7 @@ OPT_FLAGS	?= -Ofast -march=native
 #OPT_FLAGS	?= -O0 -g
 CFLAGS		+= $(OPT_FLAGS) -std=c99 -Wall
 CXXFLAGS	+= $(OPT_FLAGS) -pthread -std=c++17 -Wall
-SDSL_ROOT	= ./sdsl-lite/build
-CPPFLAGS	+= -isystem $(SDSL_ROOT)/include -isystem $(SDSL_ROOT)/external/libdivsufsort/include
-STATIC_LIBRARIES = $(SDSL_ROOT)/external/libdivsufsort/lib/libdivsufsort.a $(SDSL_ROOT)/external/libdivsufsort/lib/libdivsufsort64.a $(SDSL_ROOT)/lib/libsdsl.a
-
+CPPFLAGS	+= -I sdsl-lite-v3/include
 
 founderblockgraph_objects = founderblockgraph_cmdline.o founderblockgraph.o founder_block_index.o
 locate_patterns_objects = locate_patterns_cmdline.o locate_patterns.o founder_block_index.o

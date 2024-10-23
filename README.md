@@ -8,15 +8,6 @@ $ git clone --recurse-submodules https://github.com/algbio/founderblockgraphs.gi
 $ cd founderblockgraphs
 ```
 
-Build sdsl-lite:
-```
-$ cd sdsl-lite
-$ export GNUMAKEFLAGS=-j9
-$ ./install.sh
-$ export GNUMAKEFLAGS=
-$ cd ..
-```
-
 Build this project (`founderblockgraph`, `locate_multiple`, `locate_patterns`):
 ```
 $ make
