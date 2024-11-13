@@ -2710,7 +2710,7 @@ namespace {
 			// semi-repeat-free property (sources and sinks are special)
 			if (occnodeindex != 0 || block != occblock) {
 #ifdef EFG_HPP_DEBUG
-				std::cerr << "Invalid occurrence of node " << node_labels[node] << " (block " << node_blocks[node] << ") starting from node " << node_labels[occnode] << " (block " << node_blocks[occnode] << ")" << std::endl;
+				std::cerr << "Invalid occurrence of node " << node_labels[node] << " (block " << block+1 << ") starting from node " << node_labels[occnode] << " (block " << block+1 << ")" << std::endl;
 #endif
 				return false;
 			}
@@ -2734,8 +2734,10 @@ namespace {
 	{
 		for (size_type i = startnode; i < node_labels.size(); i+= step) {
 			if (!efg_validate_node(i, node_labels, ordered_edges, node_blocks, is_source, is_sink, ignore_chars, index, dels_rs, dels_ss)) {
+				//to_remove[node_blocks[i]] = true;
+				//TODO DEBUG
 				assert(node_blocks[i] > 0 and node_blocks[i] < to_remove.size());
-				to_remove[node_blocks[i]] = true;
+				to_remove[node_blocks[i]-1] = true;
 			}
 		}
 	}
@@ -2808,8 +2810,10 @@ namespace {
 		if (threads == -1) {
 			for (size_type i = 0; i < node_labels.size(); i++) {
 				if (!efg_validate_node(i, node_labels, ordered_edges, node_blocks, is_source, is_sink, ignore_chars, index, dels_rs, dels_ss)) {
+					//to_remove[node_blocks[i]] = true;
+					//TODO DEBUG
 					if (node_blocks[i] > 0)
-						to_remove[node_blocks[i]] = true;
+						to_remove[node_blocks[i]-1] = true;
 					result = false;
 				}
 			}
@@ -3000,8 +3004,8 @@ int main(int argc, char **argv)
 			if (args_info.heuristic_subset_arg != -1) {
 				bool done = false;
 				int iterations = 0;
+				std::vector<bool> to_remove(block_indices.size(), false);
 				while (!done) {
-					std::vector<bool> to_remove(block_indices.size(), false);
 					iterations += 1;
 					make_efg(block_indices, realMSA, node_labels, node_blocks, edges, output_paths, paths); // TODO: lower RAM usage for huge graphs
 					done = efg_validate(block_indices, node_labels, node_blocks, edges, ignorechars, threads, to_remove);
@@ -3010,16 +3014,23 @@ int main(int argc, char **argv)
 					size_type invalidblocks = 0;
 					for (auto a : to_remove)
 						invalidblocks += a;
-					std::cerr << invalidblocks << " invalid blocks" << std::endl;
+					std::cerr << invalidblocks << " blocks to remove" << std::endl;
+					/*std::cerr << "the blocks are ";
+					for (size_type i = 0; i < block_indices.size(); i++) {
+						if (to_remove[i])
+							std::cerr << block_indices[i] << " ";
+					}
+					std::cerr << std::endl;*/
 
-					for (size_type i = 1; i < block_indices.size(); i++) {
-						// segments are [0..block_indices[0]], [block_indices[i]+1..block_indices[i+1]]
-						if (to_remove[i]) {
-							assert(f[block_indices[i-1]+1] <= block_indices[i]);
-							f[block_indices[i-1]+1] = block_indices[i]+1;
+					std::vector <size_type> new_block_indices;
+					for (size_type i = 0; i < block_indices.size(); i++) {
+						if (!to_remove[i]) {
+							new_block_indices.push_back(block_indices[i]);
+						} else {
+							to_remove[i] = false;
 						}
 					}
-					segment_elastic_minmaxlength(block_indices, disable_efg_tricks, f, realMSA[0].size());
+					std::swap(block_indices, new_block_indices);
 				}
 				std::cerr << "Graph fixed in " << iterations-1 << "iterations…\n";
 				std::cerr << "Writing the xGFA to disk…\n";
