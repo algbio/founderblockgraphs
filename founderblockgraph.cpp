@@ -156,10 +156,6 @@ namespace {
 		std::fstream fs;
 		fs.open(input_path, std::fstream::in);
 
-		// Opening output stream for DEBUGing
-		std::fstream fs2;
-		fs2.open((std::string(input_path)+"."+std::to_string(gap_limit) + ".filtered").c_str(), std::fstream::out);
-
 		// Assume that the first line contains a header.
 		std::getline(fs, identifier);
 		if (output_paths) identifiers.push_back(identifier.substr(1));
@@ -181,7 +177,6 @@ namespace {
 						(elastic || check_gaps(identifier, entry, gap_limit)))
 				{
 					msa.push_back(entry);
-					fs2 << remove_gaps(entry) << std::endl;
 				}
 				entry.clear();
 				identifier = line;
@@ -202,9 +197,7 @@ namespace {
 				(elastic || check_gaps(identifier, entry, gap_limit)))
 		{
 			msa.push_back(entry);
-			fs2 << remove_gaps(entry) << std::endl;
 		}
-		fs2.close();      
 	} 
 
 	void parse_input(char const *input_path, size_type &m, size_type &n, const bool output_paths, std::vector<std::string> &identifiers) {
