@@ -1,5 +1,6 @@
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <sdsl/construct.hpp>
 #include <sdsl/suffix_arrays.hpp>
@@ -13,6 +14,10 @@
 #include <set>
 #include <vector>
 #include <thread>         // std::thread
+#include <atomic>
+#include <mutex>
+#include <stdio.h>
+#include <unistd.h>
 #include "founderblockgraph_cmdline.h"
 #include "founder_block_index.hpp"
 
@@ -143,7 +148,6 @@ namespace {
 		return false;
 	}
 
-
 	void read_input(char const *input_path, std::size_t gap_limit, bool elastic, std::vector <std::string> &msa, bool output_paths, std::vector<std::string> &identifiers)
 	{
 		std::string line, identifier, entry;
@@ -203,6 +207,124 @@ namespace {
 		fs2.close();      
 	} 
 
+	void parse_input(char const *input_path, size_type &m, size_type &n, const bool output_paths, std::vector<std::string> &identifiers) {
+		m = 0;
+		n = 0;
+		std::string line, identifier;
+		std::size_t entrysize = 0;
+
+		// Reading input fasta
+		std::fstream fs;
+		fs.open(input_path, std::fstream::in);
+
+		// Assume that the first line contains a header.
+		std::getline(fs, identifier);
+		if (output_paths) identifiers.push_back(identifier.substr(1));
+
+		std::size_t expected_length(0);
+		bool is_first(true);
+		while (std::getline(fs, line))
+		{
+			if (line[0] == '>') // header
+			{
+				if (output_paths) identifiers.push_back(line.substr(1));
+				if (is_first)
+				{
+					expected_length = entrysize;
+					n = expected_length;
+					is_first = false;
+				}
+
+				if (expected_length != entrysize)
+				{
+					std::cerr << "MSA rows have mismatching size!" << std::endl;
+					exit(1);
+				}
+
+				m += 1;
+				entrysize = 0;
+				identifier = line;
+			}
+			else
+			{
+				entrysize += line.size();
+			}
+		}
+		fs.close();
+
+		if (is_first)
+		{
+			expected_length = entrysize;
+			n = expected_length;
+		}
+		if (expected_length != entrysize)
+		{
+			std::cerr << "MSA rows have mismatching size!" << std::endl;
+			exit(1);
+		}
+		m += 1;
+	}
+
+	std::fstream load_rows_fs;
+	bool load_rows_is_first = true;
+	std::mutex load_rows_mutex;
+	std::atomic_int load_rows_startrow = 0;
+	std::vector<std::string> load_rows(char const *input_path, int rows, int &output_startrow)
+	{
+		assert(rows > 0);
+		std::vector<std::string> msa;
+		std::scoped_lock lock(load_rows_mutex);
+		std::string line, identifier, entry;
+		output_startrow = load_rows_startrow;
+
+		if (!load_rows_fs.is_open())
+		{
+			load_rows_fs.open(input_path, std::fstream::in);
+			// Assume that the first line contains a header.
+			std::getline(load_rows_fs, identifier);
+		}
+
+		while (std::getline(load_rows_fs, line))
+		{
+			if (line[0] == '>') // header
+			{
+				msa.push_back(entry);
+				entry.clear();
+				if ((int)msa.size() >= rows) {
+					load_rows_startrow += msa.size();
+					return msa;
+				}
+			}
+			else
+			{
+				entry += line;
+			}
+		}
+
+		if (entry.size() > 0) {
+			msa.push_back(entry);
+		}
+		load_rows_startrow += msa.size();
+		return msa;
+	}
+
+	// literal C code here, TODO implement in C++ with a proper writer thread I guess
+	FILE* offload_rows_fp = NULL;
+	void offload_rows(char const *input_path, size_type const m, size_type const n, const std::vector<std::string> &msa, const int startrow)
+	{
+		if (offload_rows_fp == NULL) {
+			offload_rows_fp = fopen((std::string(input_path) + ".transpose").c_str(), "w");
+			// TODO check status
+		}
+		int const fd = fileno(offload_rows_fp);
+
+		for (size_type col = 0; col < n; col++) {
+			std::string strip;
+			for (size_type msarow = 0; msarow < msa.size(); msarow++)
+				strip += msa[msarow][col];
+			pwrite(fd, strip.c_str(), msa.size(), startrow + col * m);
+		}
+	}
 
 	bool load_cst(char const *input_path, std::vector<std::string> const &MSA, cst_type &cst, size_t gap_limit) {
 
@@ -326,7 +448,7 @@ namespace {
 				fs.open(std::string(input_path) + plain_suffix, std::fstream::out);
 				for (auto const &seq : MSA)
 				{
-					for (long int i = 0; i < seq.size(); i++)
+					for (unsigned long i = 0; i < seq.size(); i++)
 					{
 						if ('-' != seq[i])
 							fs << seq[i];
@@ -889,6 +1011,145 @@ namespace {
 		std::cerr << std::flush;
 	}
 
+	void make_efg_external(
+			char const *input_path,
+			size_type m,
+			size_type n,
+			const std::vector<size_type> &boundaries,
+			const std::vector<std::string> &MSA,
+			std::vector <std::string> &out_labels,
+			std::vector <size_type> &out_blocks,
+			adjacency_list &out_edges,
+			bool output_paths,
+			std::vector<std::vector<size_type>> &out_paths
+	) {
+		std::fstream fs;
+		fs.open(std::string(input_path) + ".transpose", std::fstream::in);
+
+		out_labels.clear();
+		out_blocks.clear();
+		out_edges.clear();
+		out_paths.clear();
+
+		/* Convert arbitrary segmentation into EFG */
+		// TODO: check, O(log(n)) complexity of operations?
+
+		std::vector<std::unordered_map<std::string, std::pair<size_type,size_type>>> str2ids (boundaries.size()); // map label -> node_id, block?
+		size_type nodecount = 0;
+		size_type previndex = 0;
+
+		typedef std::vector<size_type> block_vector;
+		typedef std::vector<block_vector> block_matrix;
+		block_matrix blocks(boundaries.size());
+		std::string ellv, ellw;
+		std::vector<std::vector<size_type>> paths(m, std::vector<size_type>());
+		for (size_type j=0; j<boundaries.size(); j++) {
+			// read (boundaries[j] - previndex + 1) columns
+			std::vector<std::string> block_transpose;
+			if (boundaries[j]+1 <= previndex) {
+				std::cerr << "DEBUG: boundaries[j] is " << boundaries[j] << " and previndex is " << previndex << std::endl;
+			}
+			assert(boundaries[j]+1 > previndex);
+			for (size_type i = 0; i < boundaries[j] - previndex + 1; i++) {
+				std::vector<char> s(m+1);
+				fs.get(&s[0], m+1);
+				if (s[0] != 0)
+					block_transpose.push_back(std::string(s.data()));
+			}
+			for (size_type i=0; i<m; i++) {
+				ellv.clear();
+				for (size_type j = 0; j < block_transpose.size(); j++)
+					ellv += block_transpose[j][i];
+				ellv = remove_gaps(ellv);
+				if (ellv.length() == 0)
+					continue;
+				if (!str2ids[j].count(ellv)) {
+					blocks[j].push_back(nodecount);
+					std::pair p(nodecount++, j);
+					str2ids[j][ellv] = p;
+				}
+				if (output_paths) paths[i].push_back(str2ids[j][ellv].first);
+			}
+			previndex = boundaries[j]+1;
+		}
+
+		std::vector<std::string> labels(nodecount);
+		std::vector<size_type> bblocks(nodecount);
+		for (auto &str2id : str2ids) {
+			for (const auto& pair : str2id) {
+				labels[pair.second.first] = pair.first;
+				bblocks[pair.second.first] = pair.second.second;
+			}
+		}
+		size_type totallength = 0;
+		for (size_type i=0; i<nodecount; i++)
+			totallength += labels[i].size();
+
+		std::cerr << "#nodes=" << nodecount << std::endl;
+		std::cerr << "total length of node labels=" << totallength << std::endl;
+
+		adjacency_list edges(nodecount);
+		previndex = 0;
+		for (size_type k=0; k<boundaries.size()-1; k++)
+		{
+			std::vector<std::string> block_transpose, block_transpose2;
+			fs.clear();
+			fs.seekg(previndex * m);
+			for (size_type ii = 0; ii < boundaries[k]-previndex+1; ii++) {
+				std::vector<char> s(m+1);
+				fs.get(&s[0], m+1);
+				if (s[0] != 0)
+					block_transpose.push_back(std::string(s.data()));
+			}
+			fs.clear();
+			fs.seekg((boundaries[k]+1) * m);
+			for (size_type ii = 0; ii < boundaries[k+1]-boundaries[k]; ii++) {
+				std::vector<char> s(m+1);
+				fs.get(&s[0], m+1);
+				if (s[0] != 0)
+					block_transpose2.push_back(std::string(s.data()));
+			}
+			for (size_type i=0; i<m; i++)
+			{
+				ellv.clear();
+				for (size_type j = 0; j < block_transpose.size(); j++)
+					ellv += block_transpose[j][i];
+				ellv = remove_gaps(ellv);
+
+				ellw.clear();
+				for (size_type j = 0; j < block_transpose2.size(); j++)
+					ellw += block_transpose2[j][i];
+				ellw = remove_gaps(ellw);
+
+				if (ellv.length() == 0 || ellw.length() == 0)
+					continue;
+				auto const &src_node_label(ellv);
+				auto const &dst_node_label(ellw);
+				auto const src_node_idx_it(str2ids[k].find(src_node_label));
+				auto const dst_node_idx_it(str2ids[k+1].find(dst_node_label));
+				assert(src_node_idx_it != str2ids[k].end());
+				assert(dst_node_idx_it != str2ids[k+1].end());
+				auto const src_node_idx(src_node_idx_it->second);
+				auto const dst_node_idx(dst_node_idx_it->second);
+				edges[src_node_idx.first].insert(dst_node_idx.first);
+			}
+
+			previndex = boundaries[k]+1;
+		}
+		size_type edgecount = 0;
+		for (size_type i=0; i<nodecount; i++)
+			edgecount += edges[i].size();
+		std::cerr << "#edges=" << edgecount << std::endl;
+
+		using std::swap;
+		swap(out_labels, labels);
+		swap(out_blocks, bblocks);
+		swap(out_edges, edges);
+		swap(out_paths, paths);
+		std::cerr << std::flush;
+		fs.close();
+	}
+
 	void output_efg(
 			const std::vector<size_type> &boundaries,
 			const std::vector<std::string> &MSA,
@@ -1005,6 +1266,168 @@ namespace {
 			dst_os << paths[i][paths[i].size()-1] << "+";
 			dst_os << "\t*" << std::endl;
 		}
+	}
+
+	void output_efg_external(
+			const std::vector<size_type> &boundaries,
+			char const *input_path,
+			size_type const m,
+			size_type const n,
+			bool output_paths,
+			std::vector<std::string> const &identifiers,
+			char const *dst_path_c
+	) {
+		std::fstream fs;
+		fs.open(std::string(input_path) + ".transpose", std::fstream::in);
+
+		// create the output file
+		std::string const dst_path(dst_path_c);
+		std::fstream dst_os;
+		dst_os.exceptions(std::fstream::failbit);
+		dst_os.open(dst_path, std::ios_base::out);
+
+		// MSA info
+		dst_os << "M\t" << m << "\t" << n << std::endl;
+
+		// Segmentation info
+		dst_os << "X\t1";
+		for (size_type i = 0; (int)i < (int)boundaries.size() - 1; i++)
+			dst_os << "\t" << boundaries[i] + 2;
+		dst_os << std::endl;
+
+		// Partition of nodes into blocks
+		dst_os << "B\t";
+		for (size_t j = 0, previndex = 0; (int)j < (int)boundaries.size(); previndex = boundaries[j]+1, j++) {
+			std::unordered_set<std::string> labels;
+			std::vector<std::string> block_transpose;
+			for (size_type i = 0; i < boundaries[j] - previndex + 1; i++) {
+				std::vector<char> s(m+1);
+				fs.get(&s[0], m+1);
+				if (s[0] != 0)
+					block_transpose.push_back(std::string(s.data()));
+			}
+
+			for (size_type i=0; i<m; i++) {
+				std::string label;
+				for (size_type j = 0; j < block_transpose.size(); j++)
+					label += block_transpose[j][i];
+				label = remove_gaps(label);
+				if (label != "")
+					labels.insert(label);
+			}
+			dst_os << ((j == 0) ? "" : "\t") << labels.size();
+		}
+		dst_os << std::endl;
+
+		// Output nodes and edges
+		// data structures to map node labels of a block to their ID/index
+		std::unordered_map<std::string, size_type> str2id_previous_block;
+		std::unordered_map<size_type,   size_type> row2id_previous_block;
+		std::unordered_map<std::string, size_type> str2id_current_block;
+		size_type nodecount = 0;
+		for (size_t j = 0, previndex = 0; (int)j < (int)boundaries.size(); previndex = boundaries[j]+1, j++) {
+			std::unordered_map<size_type, size_type> row2id_current_block;
+			std::set<std::pair<size_type, size_type>> edges_to_previous_block;
+
+			std::vector<std::string> block_transpose;
+			fs.clear();
+			fs.seekg(previndex * m);
+			for (size_type ii = 0; ii < boundaries[j]-previndex+1; ii++) {
+				std::vector<char> s(m+1);
+				fs.get(&s[0], m+1);
+				if (s[0] != 0)
+					block_transpose.push_back(std::string(s.data()));
+			}
+
+			for (size_type i=0; i<m; i++) {
+				// node
+				std::string label;
+				for (size_type j = 0; j < block_transpose.size(); j++)
+					label += block_transpose[j][i];
+				label = remove_gaps(label);
+				if (label == "") // empty label
+					continue;
+
+				size_type nodeindex;
+				if (str2id_current_block.find(label) == str2id_current_block.end()) {
+					nodeindex = nodecount++;
+					dst_os << "S\t" << nodeindex << "\t" << label << std::endl;
+				} else {
+					nodeindex = str2id_current_block[label];
+				}
+				str2id_current_block[label] = nodeindex;
+				row2id_current_block[i] = nodeindex;
+
+				// compute edge
+				if (row2id_previous_block.find(i) != row2id_previous_block.end())
+					edges_to_previous_block.insert(std::pair<size_type, size_type>(row2id_previous_block[i], nodeindex));
+			}
+			// print edges
+			for (auto &p : edges_to_previous_block) {
+				dst_os << "L\t" << p.first << "\t+\t" << p.second << "\t+\t0M" << std::endl;
+			}
+
+			swap(row2id_previous_block, row2id_current_block);
+			swap(str2id_previous_block, str2id_current_block);
+			str2id_current_block.clear();
+		}
+
+		// we are done, if we do not need to output the paths
+		if (!output_paths)
+			return;
+
+		// TODO: int_vector of integers from 0 to H
+		std::vector<std::vector<size_type>> paths (m, std::vector<size_type>());
+		nodecount = 0;
+		for (size_t j = 0, previndex = 0; (int)j < (int)boundaries.size(); previndex = boundaries[j]+1, j++) {
+			std::unordered_map<std::string, size_type> str2id_current_block;
+			std::unordered_map<size_type,   size_type> row2id_current_block;
+
+			std::vector<std::string> block_transpose;
+			fs.clear();
+			fs.seekg(previndex * m);
+			assert(boundaries[j] > previndex - 1);
+			for (size_type ii = 0; ii < boundaries[j]-previndex+1; ii++) {
+				std::vector<char> s(m+1);
+				fs.get(&s[0], m+1);
+				if (s[0] != 0)
+					block_transpose.push_back(std::string(s.data()));
+			}
+
+			for (size_type i=0; i<m; i++) {
+				std::string label;
+				for (size_type j = 0; j < block_transpose.size(); j++)
+					label += block_transpose[j][i];
+				label = remove_gaps(label);
+				if (label == "") // empty label
+					continue;
+
+				size_type nodeindex;
+				if (str2id_current_block.find(label) == str2id_current_block.end()) {
+					nodeindex = nodecount++;
+				} else {
+					nodeindex = str2id_current_block[label];
+				}
+				str2id_current_block[label] = nodeindex;
+				row2id_current_block[i] = nodeindex;
+			}
+			for (auto &p : row2id_current_block) {
+				paths[p.first].push_back(p.second);
+			}
+		}
+
+		// paths
+		assert(identifiers.size() == paths.size());
+		for (size_type i = 0; i < paths.size(); i++) {
+			dst_os << "P\t" << identifiers[i] << "\t";
+			for (size_type j = 0; j < paths[i].size() - 1; j++) {
+				dst_os << paths[i][j] << "+,";
+			}
+			dst_os << paths[i][paths[i].size()-1] << "+";
+			dst_os << "\t*" << std::endl;
+		}
+
+		fs.close();
 	}
 
 	/* 
@@ -1511,7 +1934,7 @@ namespace {
 		std::vector<size_type> backtrack(n + 1, 0);
 		size_type y = 0, I = 0, S = n + 1, backtrack_S = -1;
 		for (size_type j = 1; j <= n; j++) {
-			while (j == std::get<1>(minimal_right_extensions[y])) {
+			while (y < n && j == std::get<1>(minimal_right_extensions[y])) {
 				size_type xy  = std::get<0>(minimal_right_extensions[y]);
 				size_type rec_score = minmaxlength[xy];
 				//std::cerr << "rec_score = " << rec_score << std::endl;
@@ -1627,7 +2050,7 @@ namespace {
 		std::vector<size_type> backtrack(n + 1, 0);
 		size_type y = 0, I = 0, S = n + 1, backtrack_S = -1;
 		for (size_type j = 1; j <= n; j++) {
-			while (j == std::get<1>(minimal_right_extensions[y])) {
+			while (y < n && j == std::get<1>(minimal_right_extensions[y])) {
 				size_type xy  = std::get<0>(minimal_right_extensions[y]);
 				size_type rec_score = minmaxlength[xy];
 				//std::cerr << "rec_score = " << rec_score << std::endl;
@@ -1701,26 +2124,26 @@ namespace {
 	}
 
 	void segment_elastic_minmaxlength_worker(
-			std::vector<std::string> const &MSA,
+			char const *input_path,
 			std::string &ignorechars,
 			std::vector<size_type> &out_indices,
 			const bool disable_efg_tricks,
 			std::vector<size_type> &f,
 			const long rows,
-			size_type startrow, // 0-based, included
-			const size_type endrow // 0-based, included
+			const size_type m,
+			const size_type n
 			) {
 		cst_type cst;
+		int miniMSArow = -1;
 		std::vector<std::string> miniMSA;
-		while (startrow <= endrow) {
-			auto begin = MSA.begin() + startrow;
-			auto end = MSA.begin() + std::min(startrow + rows, endrow + 1);
-
-			std::cerr << "Computing the CST of MSA[" << startrow << ".." << startrow + (end - begin) - 1 << "] (startrow is " << startrow << ")\n";
-			miniMSA = std::vector<std::string>(begin, end);
+		miniMSA = load_rows(input_path, rows, miniMSArow);
+		while (miniMSA.size() > 0) {
+			offload_rows(input_path, m, n, miniMSA, miniMSArow);
+			std::cerr << "Computing the CST of MSA[" << miniMSArow << ".." << miniMSArow + miniMSA.size() << "]\n";
 			compute_cst_im(miniMSA, cst);
 			segment_elastic_minmaxlength(miniMSA, cst, ignorechars, out_indices, disable_efg_tricks, f, false);
-			startrow += rows;
+
+			miniMSA = load_rows(input_path, rows, miniMSArow);
 		}
 	}
 
@@ -1871,7 +2294,7 @@ namespace {
 		std::vector<size_type> backtrack(n + 1, 0);
 		size_type y = 0, I = 0, S = n + 1, backtrack_S = -1;
 		for (size_type j = 1; j <= n; j++) {
-			while (j == std::get<1>(minimal_right_extensions[y])) {
+			while (y < n && j == std::get<1>(minimal_right_extensions[y])) {
 				size_type xy  = std::get<0>(minimal_right_extensions[y]);
 				size_type rec_score = minmaxlength[xy];
 				//std::cerr << "rec_score = " << rec_score << std::endl;
@@ -2071,7 +2494,7 @@ namespace {
 		std::vector<size_type> backtrack(n + 1, 0);
 		size_type y = 0, I = 0, S = n + 1, backtrack_S = -1;
 		for (size_type j = 1; j <= n; j++) {
-			while (j == std::get<1>(minimal_right_extensions[y])) {
+			while (y < n && j == std::get<1>(minimal_right_extensions[y])) {
 				size_type xy  = std::get<0>(minimal_right_extensions[y]);
 				size_type rec_score = minmaxlength[xy];
 				//std::cerr << "rec_score = " << rec_score << std::endl;
@@ -2280,7 +2703,7 @@ namespace {
 		std::vector<size_type> backtrack(n + 1, 0);
 		size_type y = 0, I = 0, S = n + 1, backtrack_S = -1;
 		for (size_type j = 1; j <= n; j++) {
-			while (j == std::get<1>(minimal_right_extensions[y])) {
+			while (y < n && j == std::get<1>(minimal_right_extensions[y])) {
 				size_type xy  = std::get<0>(minimal_right_extensions[y]);
 				size_type rec_score = minmaxlength[xy];
 				//std::cerr << "rec_score = " << rec_score << std::endl;
@@ -2712,6 +3135,7 @@ namespace {
 #ifdef EFG_HPP_DEBUG
 				std::cerr << "Invalid occurrence of node " << node_labels[node] << " (block " << block+1 << ") starting from node " << node_labels[occnode] << " (block " << block+1 << ")" << std::endl;
 #endif
+
 				return false;
 			}
 		}
@@ -2887,73 +3311,83 @@ int main(int argc, char **argv)
 
 	auto start = chrono::high_resolution_clock::now();
 
+	size_type m, n;
 	std::vector<std::string> realMSA;
 	std::vector<std::string> identifiers;
-	read_input(args_info.input_arg, gap_limit, elastic, realMSA, output_paths, identifiers);
-	if (realMSA.empty())
+	if (args_info.heuristic_subset_arg == -1)
 	{
-		std::cerr << "Unable to read sequences from the input\n.";
-		return EXIT_FAILURE;
+		read_input(args_info.input_arg, gap_limit, elastic, realMSA, output_paths, identifiers);
+
+		if (realMSA.empty())
+		{
+			std::cerr << "Unable to read sequences from the input\n.";
+			return EXIT_FAILURE;
+		}
+
+		std::cerr << "Input MSA[1.." << realMSA.size() << ",1.." << realMSA[0].size() << "]" << std::endl;   
+		m = realMSA.size();
+		n = realMSA[0].size();
+	} else
+	{
+
+		parse_input(args_info.input_arg, m, n, output_paths, identifiers);
+
+		std::cerr << "Input MSA[1.." << m << ",1.." << n << "]" << std::endl;   
 	}
-	std::cerr << "Input MSA[1.." << realMSA.size() << ",1.." << realMSA[0].size() << "]" << std::endl;   
 
 	// compute compressed suffix tree of the MSA (or load it if created in a previous run)
 	cst_type cst;
 	std::vector<std::string> miniMSA;
 	size_type miniMSArow = 0;
 	if (args_info.heuristic_subset_arg != -1) {
-		miniMSA = std::vector<std::string>(realMSA.begin() + miniMSArow, realMSA.begin() + std::min((long)realMSA.size(), (long)miniMSArow + args_info.heuristic_subset_arg));
-		if (!load_cst(args_info.input_arg, miniMSA, cst, gap_limit))
-			return EXIT_FAILURE;
-		miniMSArow += args_info.heuristic_subset_arg;
+		//miniMSA = std::vector<std::string>(realMSA.begin() + miniMSArow, realMSA.begin() + std::min((long)realMSA.size(), (long)miniMSArow + args_info.heuristic_subset_arg));
+		//if (!load_cst(args_info.input_arg, miniMSA, cst, gap_limit))
+		//	return EXIT_FAILURE;
+		//miniMSArow += args_info.heuristic_subset_arg;
 	} else {
 		if (!load_cst(args_info.input_arg, realMSA, cst, gap_limit))
 			return EXIT_FAILURE;
+		std::cerr << "MSA index construction complete, index requires " << sdsl::size_in_mega_bytes(cst) << " MiB." << std::endl;
 	}
-
-	std::cerr << "MSA index construction complete, index requires " << sdsl::size_in_mega_bytes(cst) << " MiB." << std::endl;
 
 	std::vector <std::string> node_labels;
 	std::vector <size_type> node_blocks; // index of the corresponding block
 	std::vector <size_type> block_indices; // starting index of each block
 	adjacency_list edges;
 	std::vector<std::vector<size_type>> paths;
-	std::vector<size_type> f(realMSA[0].size(), 0); // TODO initialize here
+	std::vector<size_type> f(n, 0); // TODO initialize here
 	int status = EXIT_SUCCESS;
 	if (elastic) { // semi-repeat-free efg
-		if (threads == -1)
-			segment_elastic_minmaxlength((args_info.heuristic_subset_arg != -1) ? miniMSA : realMSA, cst, ignorechars, block_indices, disable_efg_tricks, f);
-		else if (threads > 0)
-			segment_elastic_minmaxlength_multithread((args_info.heuristic_subset_arg != -1) ? miniMSA : realMSA, cst, ignorechars, block_indices, threads, disable_efg_tricks, f);
-		else {
-			std::cerr << "Invalid number of threads." << std::endl;
-			return EXIT_FAILURE;
-		}
-
-		if (args_info.heuristic_subset_arg != -1) {
+		if (args_info.heuristic_subset_arg == -1) {
+			if (threads == -1)
+				segment_elastic_minmaxlength((args_info.heuristic_subset_arg != -1) ? miniMSA : realMSA, cst, ignorechars, block_indices, disable_efg_tricks, f);
+			else if (threads > 0)
+				segment_elastic_minmaxlength_multithread((args_info.heuristic_subset_arg != -1) ? miniMSA : realMSA, cst, ignorechars, block_indices, threads, disable_efg_tricks, f);
+			else {
+				std::cerr << "Invalid number of threads." << std::endl;
+				return EXIT_FAILURE;
+			}
+		} else {
 			if (threads == -1) {
-				while (miniMSArow < realMSA.size()) {
+				while (miniMSArow < m) {
 					miniMSA.clear();
-					miniMSA = std::vector<std::string>(realMSA.begin() + miniMSArow, realMSA.begin() + std::min((long)realMSA.size(), (long)miniMSArow + args_info.heuristic_subset_arg));
+					// load r rows here!
+					//miniMSA = std::vector<std::string>(realMSA.begin() + miniMSArow, realMSA.begin() + std::min((long)realMSA.size(), (long)miniMSArow + args_info.heuristic_subset_arg));
+					int _dummy;
+					miniMSA = load_rows(args_info.input_arg, args_info.heuristic_subset_arg, _dummy);
+					offload_rows(args_info.input_arg, m, n, miniMSA, miniMSArow);
 					if (!load_cst(args_info.input_arg, miniMSA, cst, gap_limit))
 						return EXIT_FAILURE;
+					std::cerr << "MSA index construction complete, index requires " << sdsl::size_in_mega_bytes(cst) << " MiB." << std::endl;
 
-					if (threads == -1)
-						segment_elastic_minmaxlength((args_info.heuristic_subset_arg != -1) ? miniMSA : realMSA, cst, ignorechars, block_indices, disable_efg_tricks, f);
-					else if (threads > 0)
-						segment_elastic_minmaxlength_multithread((args_info.heuristic_subset_arg != -1) ? miniMSA : realMSA, cst, ignorechars, block_indices, threads, disable_efg_tricks, f);
-					else {
-						std::cerr << "Invalid number of threads." << std::endl;
-						return EXIT_FAILURE;
-					}
+					segment_elastic_minmaxlength((args_info.heuristic_subset_arg != -1) ? miniMSA : realMSA, cst, ignorechars, block_indices, disable_efg_tricks, f);
 					miniMSArow += args_info.heuristic_subset_arg;
 				}
 			} else {
 				std::vector<std::thread> t;
-				const int step = ((realMSA.size() - args_info.heuristic_subset_arg) / threads) + 1;
-				for (; miniMSArow < realMSA.size(); miniMSArow += step) {
-					std::cerr << "calling segment_elastic_minmaxlength_worker on rows [" << miniMSArow << ".." << std::min(realMSA.size() - 1, miniMSArow + step - 1) << "]\n";
-					t.push_back(std::thread(segment_elastic_minmaxlength_worker, std::ref(realMSA), std::ref(ignorechars), std::ref(block_indices), std::ref(disable_efg_tricks), std::ref(f), args_info.heuristic_subset_arg, miniMSArow, std::min(realMSA.size() - 1, miniMSArow + step - 1)));
+				for (int i = 0; i < threads; i++) {
+					std::cerr << "calling segment_elastic_minmaxlength_worker\n";
+					t.push_back(std::thread(segment_elastic_minmaxlength_worker, std::ref(args_info.input_arg), std::ref(ignorechars), std::ref(block_indices), std::ref(disable_efg_tricks), std::ref(f), args_info.heuristic_subset_arg, m, n));
 				}
 
 				for (auto &tt : t)
@@ -2961,20 +3395,17 @@ int main(int argc, char **argv)
 					tt.join();
 				}
 
-				segment_elastic_minmaxlength(block_indices, disable_efg_tricks, f, realMSA[0].size());
+				segment_elastic_minmaxlength(block_indices, disable_efg_tricks, f, n);
 			}
-		} else {
-			f.clear();
+			fclose(offload_rows_fp);
 		}
+		f.clear();
 		sdsl::util::clear(cst);
 	} else if (gap_limit == 1) { // no gaps
 		status = segment(realMSA, cst, node_labels, edges);
 	} else {
 		status = segment2elasticValid(realMSA, cst, node_labels, edges);
 	}
-
-	int m = realMSA.size();
-	int n = realMSA[0].length();
 
 	if (status == EXIT_FAILURE)
 		return EXIT_FAILURE;
@@ -3007,7 +3438,7 @@ int main(int argc, char **argv)
 				std::vector<bool> to_remove(block_indices.size(), false);
 				while (!done) {
 					iterations += 1;
-					make_efg(block_indices, realMSA, node_labels, node_blocks, edges, output_paths, paths); // TODO: lower RAM usage for huge graphs
+					make_efg_external(args_info.input_arg, m, n, block_indices, realMSA, node_labels, node_blocks, edges, output_paths, paths);
 					done = efg_validate(block_indices, node_labels, node_blocks, edges, ignorechars, threads, to_remove);
 
 					std::cerr << "There are ";
@@ -3034,7 +3465,7 @@ int main(int argc, char **argv)
 				}
 				std::cerr << "Graph fixed in " << iterations-1 << "iterations…\n";
 				std::cerr << "Writing the xGFA to disk…\n";
-				output_efg(block_indices, realMSA, output_paths, identifiers, args_info.output_arg);
+				output_efg_external(block_indices, args_info.input_arg, m, n, output_paths, identifiers, args_info.output_arg);
 			} else {
 				std::cerr << "Writing the xGFA to disk…\n";
 				output_efg(block_indices, realMSA, output_paths, identifiers, args_info.output_arg);
