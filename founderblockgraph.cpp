@@ -259,7 +259,6 @@ namespace {
 	}
 
 	std::fstream load_rows_fs;
-	bool load_rows_is_first = true;
 	std::mutex load_rows_mutex;
 	std::atomic_int load_rows_startrow = 0;
 	std::vector<std::string> load_rows(char const *input_path, int rows, int &output_startrow)
@@ -269,6 +268,7 @@ namespace {
 		std::scoped_lock lock(load_rows_mutex);
 		std::string line, identifier, entry;
 		output_startrow = load_rows_startrow;
+		std::cerr << "Reading MSA[" << load_rows_startrow << ".." << load_rows_startrow + rows - 1 << "]..." << std::endl;
 
 		if (!load_rows_fs.is_open())
 		{
@@ -317,6 +317,45 @@ namespace {
 				strip += msa[msarow][col];
 			pwrite(fd, strip.c_str(), msa.size(), startrow + col * m);
 		}
+	}
+
+	void transpose_msa_worker(
+			char const *input_path,
+			size_type const m,
+			size_type const n,
+			const long rows
+			) {
+		std::string entry, identifier, line;
+		std::fstream fasta_fs;
+		fasta_fs.open(input_path, std::fstream::in);
+		// Assume that the first line contains a header.
+		std::getline(fasta_fs, identifier);
+
+		size_type currentrow = 0;
+		std::vector<std::string> msa;
+		while (std::getline(fasta_fs, line))
+		{
+			if (line[0] == '>') // header
+			{
+				msa.push_back(entry);
+				entry.clear();
+				if ((long)msa.size() >= rows) {
+					offload_rows(input_path, m, n, msa, currentrow);
+					currentrow += msa.size();
+				}
+			}
+			else
+			{
+				entry += line;
+			}
+		}
+
+		if (entry.size() > 0) {
+			msa.push_back(entry);
+		}
+		offload_rows(input_path, m, n, msa, currentrow);
+		currentrow += msa.size();
+		fasta_fs.close();
 	}
 
 	bool load_cst(char const *input_path, std::vector<std::string> const &MSA, cst_type &cst, size_t gap_limit) {
@@ -2131,8 +2170,6 @@ namespace {
 		std::vector<std::string> miniMSA;
 		miniMSA = load_rows(input_path, rows, miniMSArow);
 		while (miniMSA.size() > 0) {
-			offload_rows(input_path, m, n, miniMSA, miniMSArow);
-			std::cerr << "Computing the CST of MSA[" << miniMSArow << ".." << miniMSArow + miniMSA.size() << "]\n";
 			compute_cst_im(miniMSA, cst);
 			segment_elastic_minmaxlength(miniMSA, cst, ignorechars, out_indices, disable_efg_tricks, f, false);
 
@@ -3361,14 +3398,13 @@ int main(int argc, char **argv)
 				return EXIT_FAILURE;
 			}
 		} else {
+			std::cerr << "Starting I/O thread to compute the MSA transpose..." << std::endl;
+			std::thread transpose_thread(transpose_msa_worker, args_info.input_arg, m, n, args_info.heuristic_subset_arg * 10); // TODO parameterize buffer
 			if (threads == -1) {
 				while (miniMSArow < m) {
 					miniMSA.clear();
-					// load r rows here!
-					//miniMSA = std::vector<std::string>(realMSA.begin() + miniMSArow, realMSA.begin() + std::min((long)realMSA.size(), (long)miniMSArow + args_info.heuristic_subset_arg));
 					int _dummy;
 					miniMSA = load_rows(args_info.input_arg, args_info.heuristic_subset_arg, _dummy);
-					offload_rows(args_info.input_arg, m, n, miniMSA, miniMSArow);
 					if (!load_cst(args_info.input_arg, miniMSA, cst, gap_limit))
 						return EXIT_FAILURE;
 					std::cerr << "MSA index construction complete, index requires " << sdsl::size_in_mega_bytes(cst) << " MiB." << std::endl;
@@ -3390,6 +3426,9 @@ int main(int argc, char **argv)
 
 				segment_elastic_minmaxlength(block_indices, disable_efg_tricks, f, n);
 			}
+			std::cerr << "Waiting for transpose thread to finish..." << std::flush;
+			transpose_thread.join();
+			std::cerr << "done." << std::endl;
 			fclose(offload_rows_fp);
 		}
 		f.clear();
