@@ -303,7 +303,7 @@ namespace {
 
 	// literal C code here, TODO implement in C++ with a proper writer thread I guess
 	FILE* offload_rows_fp = NULL;
-	void offload_rows(char const *input_path, size_type const m, size_type const n, const std::vector<std::string> &msa, const int startrow)
+	void offload_rows(char const *input_path, size_type const m, size_type const n, const std::vector<std::string> &msa, const size_type startrow)
 	{
 		if (offload_rows_fp == NULL) {
 			offload_rows_fp = fopen((std::string(input_path) + ".transpose").c_str(), "w");
@@ -3399,7 +3399,7 @@ int main(int argc, char **argv)
 			}
 		} else {
 			std::cerr << "Starting I/O thread to compute the MSA transpose..." << std::endl;
-			std::thread transpose_thread(transpose_msa_worker, args_info.input_arg, m, n, args_info.heuristic_subset_arg * 10); // TODO parameterize buffer
+			std::thread transpose_thread(transpose_msa_worker, args_info.input_arg, m, n, 100); // TODO parameterize buffer
 			if (threads == -1) {
 				while (miniMSArow < m) {
 					miniMSA.clear();
