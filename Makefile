@@ -1,37 +1,29 @@
 GENGETOPT	?= gengetopt
-
 OPT_FLAGS	?= -Ofast -march=native
 #OPT_FLAGS	?= -O0 -g
 CFLAGS		+= $(OPT_FLAGS) -std=c99 -Wall
-CXXFLAGS	+= $(OPT_FLAGS) -pthread -std=c++17 -Wall -lc
-CPPFLAGS	+= -I ./sdsl-lite-v3/include
+CXXFLAGS	+= $(OPT_FLAGS) -std=c++20 -Wall -lc -lz
 
-founderblockgraph_objects = founderblockgraph_cmdline.o founderblockgraph.o founder_block_index.o
-locate_patterns_objects = locate_patterns_cmdline.o locate_patterns.o founder_block_index.o
-locate_multiple_objects = locate_multiple.o founder_block_index.o
+locate_patterns_objects = src/command-line-parsing/locate_patterns.o src/locate_patterns.o
+locate_patterns_deps = lib/gfakluge/src/gfakluge.hpp lib/seqtk/kseq.h src/gafanchor.hpp
+locate_patterns_CXXFLAGS = -I ./lib/sdsl-lite-v3/include -I ./lib/gfakluge/src -I ./lib/gfakluge/src/tinyFA -isystem ./lib/gfakluge/src/tinyFA/pliib -I ./lib/seqtk
 
-
-all: founderblockgraph locate_patterns locate_multiple
+all: locate_patterns
 
 clean:
-	$(RM) founderblockgraph locate_patterns $(founderblockgraph_objects) $(locate_patterns_objects) $(locate_multiple_objects)
+	$(RM) locate_patterns $(locate_patterns_objects)
 
-founderblockgraph: $(founderblockgraph_objects)
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(founderblockgraph_objects)
+locate_patterns: $(locate_patterns_objects) $(locate_patterns_deps)
+	$(CXX) $(CXXFLAGS) -o $@ $(locate_patterns_objects)
 
-locate_patterns: $(locate_patterns_objects)
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(locate_patterns_objects)
-
-locate_multiple: $(locate_multiple_objects)
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(locate_multiple_objects)
-
-founderblockgraph.cc: cmdline.c
+src/locate_patterns.o: src/locate_patterns.cpp $(locate_patterns_deps)
+	$(CXX) -c $(locate_patterns_CXXFLAGS) $(CXXFLAGS) -o $@ $<
 
 %.o: %.cpp
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) -o $@ $<
 
 %.o: %.c
-	$(CC) -c $(CPPFLAGS) $(CFLAGS) -o $@ $<
+	$(CC) -c $(CFLAGS) -o $@ $<
 
 %.c: %.ggo
-	$(GENGETOPT) --input="$<" -F $*
+	$(GENGETOPT) --unnamed-opts --input="$<" -F $(basename $(notdir $@)) --output-dir $(dir $@)

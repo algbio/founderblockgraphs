@@ -1,0 +1,7 @@
+package		"locate_patterns"
+version		"0.2.0"
+purpose		"Locates occurrences of the given patterns in a repeat-free GFA graph (founder graphs, dBGs, and more?)"
+usage		"locate_patterns graph.gfa patterns.fasta matches.gaf"
+description	"Matches are output in GAF format."
+
+option	"overwrite"	-	"Overwrite the output file, if it exists"	flag	off

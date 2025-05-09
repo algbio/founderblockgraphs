@@ -1,58 +1,40 @@
-# founderblockgraphs
-Constructs repeat-free/semi-repeat-free non-elastic/elastic founder graphs from multiple sequence alignments.
+# exact matching in repeat-free graphs
+Branch of `founderblockgraphs` for rewriting program `locate_patterns`, implementing the *expanded search* algorithm for repeat-free founder graphs (and other graphs where nodes are unique). It expects the input graph to be in [GFA format](https://github.com/GFA-spec/GFA-spec) and contain only forward `L` links, but accepts arbitrary suffix-prefix overlap between the edges  (`0M`, `1M`, etc. up to the minimum length of the connected segments minus 1).
 
-# getting started
-Clone this repository with dependencies:
-```
-$ git clone --recurse-submodules https://github.com/algbio/founderblockgraphs.git
-$ cd founderblockgraphs
-```
-
-Build sdsl-lite-v3:
-```
-$ cd sdsl-lite-v3
-$ ./install.sh .
-$ cd ..
+## getting started
+Download and compile the project
+```console
+git clone https://github.com/algbio/founderblockgraphs
+cd founderblockgraphs
+git checkout repeat-free-locate
+git submodule update --init --recursive
+make
 ```
 
-Build this project (`founderblockgraph`, `locate_multiple`, `locate_patterns`):
-```
-$ make
-```
-
-# usage
-```
-Usage: founderblockgraph --input=MSA.fasta --output={MSA.index|efg.xgfa} [--gfa]
-[--elastic] [--gap-limit=GAPLIMIT] [--threads=THREADNUM]
-[--graphviz-output=efg.dot] [--output-paths] [--ignore-chars="ALPHABET"]
-Constructs a semi-repeat-free (Elastic) Founder Graph
-
-Input is MSA given in fasta format. In standard mode (without --elastic), rows
-with runs of gaps ‘-’ or N’s ≥ GAPLIMIT will be filtered out.
-
-  -h, --help                    Print help and exit
-      --full-help               Print help, including hidden options, and exit
-  -V, --version                 Print version and exit
-      --input=filename          MSA input path
-      --output=filename         Index/EFG output path
-      --gap-limit=GAPLIMIT      Gap limit (suppressed by --elastic)
-                                  (default=`1')
-      --graphviz-output=filename
-                                Graphviz output path
-      --memory-chart-output=filename
-                                Memory chart output path
-  -e, --elastic                 Min-max-length semi-repeat-free segmentation
-                                  (default=off)
-      --gfa                     Saves output in xGFA format  (default=off)
-  -p, --output-paths            Print the original sequences as paths of the
-                                  xGFA graph (requires --gfa)  (default=off)
-      --ignore-chars=STRING     Ignore these characters for the indexability
-                                  property/pattern matching
-  -t, --threads=THREADNUM       Max # threads  (default=`-1')
+```console
+$ ./locate_patterns test/small.gfa test/small_patterns.fasta test/small_patterns.gaf --overwrite
+Reading the graph... done.
+Adding a supersource to the graph... done.
+Indexing the graph... done.
+Locate
+p1: occurs 1 times
+p2: occurs 1 times
+p3: occurs 7 times (at most)
 ```
 
-# todo
- - document EFG tricks related to option `--ignore-chars`, to the start and end of sequences, and to initial and ending runs of gaps
- - implement validation of .gfa files
- - implement pattern matching (`locate_multiple`, `locate_patterns`) on EFGs
- - implement min max height segmentation
+## todo
+- optimize memory by using disk
+- flag to only perform decision query, no locate
+- flag to check whether input graph is repeat-free
+- handle reverse complement nodes and links
+- multithreading
+
+## cite
+The expanded backward search was initially described in
+
+> Massimo Equi, Tuukka Norri, Jarno Alanko, Bastien Cazaux, Alexandru I Tomescu, Veli Mäkinen.
+> [*Algorithms and complexity on indexing founder graphs.*](https://doi.org/10.1007/s00453-022-01007-w)
+> Algorithmica, 2023.
+
+## ack
+This project uses [GFAKluge](https://github.com/edawson/gfakluge) and [kseq.h](https://github.com/lh3/seqtk) for parsing GFA and FASTA, respectively.
