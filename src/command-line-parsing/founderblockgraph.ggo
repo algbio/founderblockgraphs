@@ -1,0 +1,19 @@
+package		"founderblockgraphs"
+version		"1.1"
+purpose		"Constructs an indexable elastic founder graphs from a multiple sequence alignment"
+usage		"founderblockgraph --input=MSA.fasta --output=efg.gfa [--non-elastic] [--gap-limit=GAPLIMIT] [--threads=THREADNUM] [--output-paths] [--ignore-chars=\"ALPHABET\"] [--heuristic-subset=ROWNUM] [--tmp-dir=PATH]"
+description	"Input is MSA given in fasta format and output in xGFA format. In non-elastic mode (currently not implemented), rows with runs of gaps ‘-’ ≥ GAPLIMIT will be filtered out."
+
+option	"input"		-	"MSA input path"	string	typestr = "filename"	required
+option	"output"	-	"Index/EFG output path"	string	typestr	= "filename"	required
+
+option	"non-elastic"	-	"Original algorithms for MSAs with little to no gaps"	flag	off
+option	"gap-limit"	-	"Filter out rows with runs of gaps ≥ GAPLIMIT in non-elastic mode"	long	typestr = "GAPLIMIT"	default = "-1"	optional
+
+option	"output-paths"		p	"Output the original sequences as paths of the xGFA graph"	flag	off
+option	"ignore-chars"		-	"Ignore these characters for the indexability property/pattern matching"	string	optional
+option	"disable-tricks"	-	"Disable the tricks considering the start and end of sequences as unique"	flag	off
+option	"heuristic-subset"	-	"Compute the optimal segmentation in chunks of ROWNUM MSA rows, then fix the resulting graph iteratively (sacrificing segmentation optimality)"	long typestr = "ROWNUM"	default = "-1"	optional
+
+option	"threads"		t	"Max # threads"					long	typestr = "THREADNUM"	default = "-1"	optional
+option	"tmp-dir"		-	"Temporary directory"	string	typestr = "filename"	default = "./"	optional

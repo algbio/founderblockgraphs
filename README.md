@@ -1,58 +1,36 @@
-# founderblockgraphs
-Constructs repeat-free/semi-repeat-free non-elastic/elastic founder graphs from multiple sequence alignments.
+# rewrite branch
+Rewrite of tool `founderblockgraph` focused on memory usage in favor of disk usage. Tested on GCC 15 and based on [SDSL v3](https://github.com/xxsds/sdsl-lite) for compact data structures and [kseq.h](https://github.com/lh3/seqtk)(kseq.h) for FASTA parsing.
 
 # getting started
-Clone this repository with dependencies:
-```
-$ git clone --recurse-submodules https://github.com/algbio/founderblockgraphs.git
-$ cd founderblockgraphs
-```
-
-Build sdsl-lite-v3:
-```
-$ cd sdsl-lite-v3
-$ ./install.sh .
-$ cd ..
-```
-
-Build this project (`founderblockgraph`, `locate_multiple`, `locate_patterns`):
-```
-$ make
+```console
+git clone https://github.com/algbio/founderblockgraphs.git
+cd founderblockgraphs
+git checkout rewrite
+git submodule update --init --recursive
+make
 ```
 
 # usage
-```
-Usage: founderblockgraph --input=MSA.fasta --output={MSA.index|efg.xgfa} [--gfa]
-[--elastic] [--gap-limit=GAPLIMIT] [--threads=THREADNUM]
-[--graphviz-output=efg.dot] [--output-paths] [--ignore-chars="ALPHABET"]
-Constructs a semi-repeat-free (Elastic) Founder Graph
+See `founderblockgraph -h`.
 
-Input is MSA given in fasta format. In standard mode (without --elastic), rows
-with runs of gaps ‘-’ or N’s ≥ GAPLIMIT will be filtered out.
+# citation
+The default construction algorithms are from
+> Nicola Rizzo, Massimo Equi, Tuukka Norri, Veli Mäkinen.
+> [*Elastic founder graphs improved and enhanced*](https://doi.org/10.1016/j.tcs.2023.114269).
+> Theoretical Computer Science, 2024.
 
-  -h, --help                    Print help and exit
-      --full-help               Print help, including hidden options, and exit
-  -V, --version                 Print version and exit
-      --input=filename          MSA input path
-      --output=filename         Index/EFG output path
-      --gap-limit=GAPLIMIT      Gap limit (suppressed by --elastic)
-                                  (default=`1')
-      --graphviz-output=filename
-                                Graphviz output path
-      --memory-chart-output=filename
-                                Memory chart output path
-  -e, --elastic                 Min-max-length semi-repeat-free segmentation
-                                  (default=off)
-      --gfa                     Saves output in xGFA format  (default=off)
-  -p, --output-paths            Print the original sequences as paths of the
-                                  xGFA graph (requires --gfa)  (default=off)
-      --ignore-chars=STRING     Ignore these characters for the indexability
-                                  property/pattern matching
-  -t, --threads=THREADNUM       Max # threads  (default=`-1')
-```
+with many optimizations (better handling of long sequences, parallelization, `--heuristic-subset`, `--ignore-chars`) introduced in
+> Nicola Rizzo, Manuel Cáceres, Veli Mäkinen.
+> [*Exploiting uniqueness: seed-chain-extend alignment on elastic founder graphs*](https://doi.org/10.1093/bioinformatics/btaf225).
+> ISMB 2025.
+
+The non-elastic construction algorithms (`--non-elastic`) are from
+> Massimo Equi, Tuukka Norri, Jarno Alanko, Bastien Cazaux, Alexandru I. Tomescu, Veli Mäkinen.
+> [*Algorithms and Complexity on Indexing Founder Graphs*](https://doi.org/10.1007/s00453-022-01007-w).
+> Algorithmica, 2023.
 
 # todo
+ - examples/tests
+ - refactor non-elastic algorithms into this branch
  - document EFG tricks related to option `--ignore-chars`, to the start and end of sequences, and to initial and ending runs of gaps
- - implement validation of .gfa files
- - implement pattern matching (`locate_multiple`, `locate_patterns`) on EFGs
- - implement min max height segmentation
+ - allow empty segments when long runs of gaps are present

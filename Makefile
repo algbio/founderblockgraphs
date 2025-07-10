@@ -1,29 +1,28 @@
 GENGETOPT	?= gengetopt
 
-OPT_FLAGS	?= -Ofast -march=native
-#OPT_FLAGS	?= -O0 -g
+OPT_FLAGS	?= -O3 -march=native
 CFLAGS		+= $(OPT_FLAGS) -std=c99 -Wall
-CXXFLAGS	+= $(OPT_FLAGS) -pthread -std=c++17 -Wall -lc
-CPPFLAGS	+= -I ./sdsl-lite-v3/include
+CXXFLAGS	+= $(OPT_FLAGS) -pthread -std=c++20 -Wall -lc -lz
+CPPFLAGS	+= -I ./lib/sdsl-lite-v3/include -isystem ./lib/seqtk
 
-founderblockgraph_objects = founderblockgraph_cmdline.o founderblockgraph.o founder_block_index.o
-
+founderblockgraph_objects = src/command-line-parsing/founderblockgraph.o src/founderblockgraph.o
+founderblockgraph_deps = src/utils.hpp src/algo.hpp src/index.hpp
 
 all: founderblockgraph
 
 clean:
 	$(RM) founderblockgraph $(founderblockgraph_objects)
 
-founderblockgraph: $(founderblockgraph_objects)
+founderblockgraph: $(founderblockgraph_objects) 
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(founderblockgraph_objects)
 
 founderblockgraph.cc: cmdline.c
 
-%.o: %.cpp
+%.o: %.cpp $(founderblockgraph_deps)
 	$(CXX) -c $(CPPFLAGS) $(CXXFLAGS) -o $@ $<
 
 %.o: %.c
-	$(CC) -c $(CPPFLAGS) $(CFLAGS) -o $@ $<
+	$(CC) -c $(CFLAGS) -o $@ $<
 
-%.c: %.ggo
-	$(GENGETOPT) --input="$<" -F $*
+#%.c: %.ggo
+#	$(GENGETOPT) --unnamed-opts --input="$<" -F $(basename $(notdir $@)) --output-dir $(dir $@)
