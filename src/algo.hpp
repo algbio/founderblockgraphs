@@ -23,7 +23,7 @@
 
 namespace fbg::algo {
 
-using std::cerr, std::endl, std::string, std::vector, std::unordered_map, std::ofstream, std::unordered_set, std::pair, std::list, std::max, std::min, std::filesystem::path, std::thread, std::jthread, std::ref, std::atomic;
+using std::cerr, std::endl, std::string, std::vector, std::unordered_map, std::ofstream, std::unordered_set, std::pair, std::list, std::max, std::min, std::filesystem::path, std::filesystem::exists, std::filesystem::create_directory, std::filesystem::remove, std::thread, std::jthread, std::ref, std::atomic;
 using fbg::utils::open_msa_file, fbg::utils::get_msa_line, fbg::utils::close_msa_file, fbg::utils::contains_chars;
 using fbg::index::msa_index, fbg::index::efg, fbg::index::efg_index, fbg::index::node_t, fbg::index::sa_type, fbg::index::index_external_memory;
 using sdsl::bit_vector;
@@ -724,6 +724,7 @@ void prune(segmentation &S, vector<bool> &to_remove)
 const string _ignorechars = "";
 void heuristic_index_compute_f_worker(
 		const path &tmpdir,
+		const int thread_id,
 		const int heuristic_subset,
 		atomic<unsigned long long> &m, // update this to total rows
 		unsigned long long &n,
@@ -731,10 +732,16 @@ void heuristic_index_compute_f_worker(
 		const string &ignorechars = _ignorechars,
 		const bool disable_efg_tricks = false
 ) {
+	const path &thread_tmpdir = tmpdir / ("thread_" + std::to_string(thread_id+1));
+	if (exists(thread_tmpdir)) {
+		cerr << "ERROR (thread " << thread_id+1 << "): directory " << thread_tmpdir << " already exists! Please clean up the temporary directory." << endl;
+		exit(1);
+	}
+	create_directory(thread_tmpdir);
 	unsigned long long mm = 0;
 	unsigned long long startrow = 0;
 	do {
-		msa_index index = index_external_memory(path(), tmpdir, ignorechars, mm, n, startrow, heuristic_subset);
+		msa_index index = index_external_memory(path(), thread_tmpdir, ignorechars, mm, n, startrow, heuristic_subset);
 		if (mm == 0) break;
 		compute_f_range<atomic<size_type>>(mm, n, index, 0, n - 1, f, (ignorechars != ""), disable_efg_tricks);
 		// alternatively, compute_f<atomic<size_type>>(mm, n, index, f, (ignorechars != ""), disable_efg_tricks);
@@ -746,6 +753,7 @@ void heuristic_index_compute_f_worker(
 #endif
 		m += mm;
 	} while (true);
+	remove(thread_tmpdir);
 }
 
 /* notes: streams from disk heuristic_subset (times the number of threads) rows at a time */
@@ -801,6 +809,7 @@ segmentation heuristic_subset_segmentation_minmaxlength(
 		for (int k = 0; k < threads; k++) {
 			t.push_back(thread(heuristic_index_compute_f_worker,
 						ref(tmpdir),
+						k,
 						heuristic_subset,
 						ref(mm),
 						ref(n),

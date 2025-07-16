@@ -42,7 +42,7 @@ struct msa_index {
 };
 
 /* requires: msa path, tmp dir, ignore chars
- * modifies: optional m, n to store msa size
+ * modifies: optional m, n, startrow to store msa size and starting msa row
  * returns: full msa index
  * notes: thread safe if cap != -1, stop after reading cap rows if cap != -1, TODO store/load index from memory? */
 unsigned long long _m, _n, _startrow; // dummy variables
@@ -95,7 +95,8 @@ msa_index index_external_memory(const path &msapath, const path &tmpdir, const s
 	}
 
 	// build cst and rank/support structures
-	sdsl::construct(index.cst, concat_file.string(), 1); // generate index
+	sdsl::cache_config c(true, tmpdir.string());
+	sdsl::construct(index.cst, concat_file.string(), c, 1); // generate index
 	index.rs_concat_separators = rank_type(&index.concat_separators);
 	index.rs_nongaps.resize(m);
 	for (size_type i = 0; i < m; i++)
