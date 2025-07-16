@@ -194,12 +194,13 @@ void compute_f(
 	const auto &nongaps = index.nongaps;
 	const auto &rs_nongaps = index.rs_nongaps;
 	const auto &ss_nongaps = index.ss_nongaps;
+	const auto &ignores = index.ignores;
 	const auto &rs_ignores = index.rs_ignores;
 	const auto &ss_ignores = index.ss_ignores;
 
 	// find the nodes corresponding to reading each whole row
 	vector<node_t> leaves(m, cst.root());
-	unordered_map<size_type, size_type> leavesmap;
+	unordered_map<size_type, size_type> leavesmap; // leaf index -> MSA row
 	for (size_type next = 0, i = 0; i < m; i++) {
 		leaves[i] = cst.select_leaf(cst.csa.isa[next] + 1);
 		leavesmap[cst.lb(leaves[i])] = i;
@@ -223,9 +224,11 @@ void compute_f(
 #endif
 
 		size_type fimax = x;
-		// Mark each leaf in leaves, filtering first all leaves corresponding to full rows
+		// Mark each leaf in leaves, after filtering
 		for (size_type i = 0; i < m; i++) {
-			if (fullrow[i])
+			if (!disable_efg_tricks and fullrow[i]) // leaf corresponds to full row
+				continue;
+			if (ignorechars and ignores[i][x]) // leaf corresponds to suffix starting with ignorechar
 				continue;
 			for (size_type ll = cst.lb(leaves[i]); ll <= cst.rb(leaves[i]); ll++) { // cst is not a generalized suffix tree
 				color[ll] = true;
@@ -235,7 +238,7 @@ void compute_f(
 		// Process each set of contiguous leaves
 		for (size_type i = 0; i < m; i++) {
 			node_t const l = leaves[i];
-			if (fullrow[i])
+			if (fullrow[i] or (ignorechars and ignores[i][x])) // leaves corresponding to full rows or ignorechar
 				continue;
 			if (cst.lb(l) == 0 || color[cst.lb(l) - 1] == false) {
 				// if leftmost leaf does not correspond to row i, skip
@@ -302,14 +305,15 @@ void compute_f(
 }
 
 /* version of compute_f_range that computes range [startx..endx] of f
- * notes: O(l * m * log m), where l = endx - startx */
+ * notes: we avoid consuming O(n) bits of space and use O(m) space instead, increasing time? */
+template<typename T = size_type>
 void compute_f_range(
 		size_type const m,
 		size_type const n,
 		const msa_index &index,
 		size_type const startx,
 		size_type const endx,
-		vector<size_type> &f, // store result here
+		vector<T> &f, // store result here
 		const bool ignorechars,
 		const bool disable_efg_tricks
 ) {
@@ -319,6 +323,7 @@ void compute_f_range(
 	const auto &nongaps = index.nongaps;
 	const auto &rs_nongaps = index.rs_nongaps;
 	const auto &ss_nongaps = index.ss_nongaps;
+	const auto &ignores = index.ignores;
 	const auto &rs_ignores = index.rs_ignores;
 	const auto &ss_ignores = index.ss_ignores;
 
@@ -346,7 +351,9 @@ void compute_f_range(
 		// Process each set of contiguous leaves
 		for (size_type i = 0; i < m; i++) {
 			node_t const l = leaves[i];
-			if (!disable_efg_tricks && rs_nongaps[i].rank(x) == 0)
+			if (!disable_efg_tricks and rs_nongaps[i].rank(x) == 0) // leaves corresponding to full rows
+				continue;
+			if (ignorechars and ignores[i][x]) // leaves corresponding to ignorechars
 				continue;
 			if (cst.lb(l) == 0 || leavesmap.find(cst.lb(l) - 1) == leavesmap.end()) {
 				// if leftmost leaf does not correspond to row i, skip
@@ -397,7 +404,7 @@ void compute_f_range(
 				}
 			}
 		}
-		f[x] = max(f[x], fimax);
+		update_max(f[x], fimax);
 
 		for (size_type i = 0; i < m; i++) {
 			if (nongaps[i][x]) {
@@ -425,7 +432,7 @@ void compute_f_multithread(
 
 	vector<thread> t;
 	for (int k = 0; k < threads and consumed < n; k++) {
-		t.push_back(thread(compute_f_range,
+		t.push_back(thread(compute_f_range<>,
 				m,
 				n,
 				ref(index),
@@ -729,7 +736,8 @@ void heuristic_index_compute_f_worker(
 	do {
 		msa_index index = index_external_memory(path(), tmpdir, ignorechars, mm, n, startrow, heuristic_subset);
 		if (mm == 0) break;
-		compute_f<atomic<size_type>>(mm, n, index, f, (ignorechars != ""), disable_efg_tricks);
+		compute_f_range<atomic<size_type>>(mm, n, index, 0, n - 1, f, (ignorechars != ""), disable_efg_tricks);
+		// alternatively, compute_f<atomic<size_type>>(mm, n, index, f, (ignorechars != ""), disable_efg_tricks);
 #ifdef ALGO_HPP_DEBUG
 		double fmean = 0;
 		for (const auto &ff : f) fmean += ff;
